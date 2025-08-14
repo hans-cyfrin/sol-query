@@ -535,6 +535,56 @@ class FunctionCollection(BaseCollection):
                 filtered.append(func)
         return self._create_new_collection(filtered)
 
+    # Data flow methods
+    def with_data_flow_between(self, from_variable: str, to_variable: str) -> "FunctionCollection":
+        """Functions where data flows from one variable to another."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+
+        tracker = VariableTracker()
+        filtered = []
+
+        for func in self._elements:
+            # Track variables in this function
+            references = tracker.track_function(func)
+
+            # Check if there's data flow between the variables
+            from_refs = [r for r in references if r.variable_name == from_variable and r.is_read]
+            to_refs = [r for r in references if r.variable_name == to_variable and r.is_write]
+
+            # Simple heuristic: if both variables are referenced, there might be flow
+            if from_refs and to_refs:
+                filtered.append(func)
+
+        return self._create_new_collection(filtered)
+
+    def reading_variable(self, variable_name: str) -> "FunctionCollection":
+        """Functions that read a specific variable."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+
+        tracker = VariableTracker()
+        filtered = []
+
+        for func in self._elements:
+            references = tracker.track_function(func)
+            if any(r.variable_name == variable_name and r.is_read for r in references):
+                filtered.append(func)
+
+        return self._create_new_collection(filtered)
+
+    def writing_variable(self, variable_name: str) -> "FunctionCollection":
+        """Functions that modify a specific variable."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+
+        tracker = VariableTracker()
+        filtered = []
+
+        for func in self._elements:
+            references = tracker.track_function(func)
+            if any(r.variable_name == variable_name and r.is_write for r in references):
+                filtered.append(func)
+
+        return self._create_new_collection(filtered)
+
 
 class VariableCollection(BaseCollection):
     """Collection of variable declarations with fluent query methods."""
@@ -733,6 +783,129 @@ class StatementCollection(BaseCollection):
             if text in source_code:
                 filtered.append(stmt)
         return self._create_new_collection(filtered)
+
+    # Data flow methods
+    def influenced_by_variable(self, variable_name: str) -> "StatementCollection":
+        """Filter statements influenced by a specific variable."""
+        from sol_query.analysis.data_flow import DataFlowAnalyzer
+        from sol_query.analysis.variable_tracker import VariableTracker
+
+        tracker = VariableTracker()
+        filtered = []
+
+        for stmt in self._elements:
+            # Check if statement is influenced by the variable
+            references = tracker.get_variable_references(variable_name)
+            for ref in references:
+                if ref.statement == stmt and ref.is_read:
+                    filtered.append(stmt)
+                    break
+
+        return self._create_new_collection(filtered)
+
+    def influencing_variable(self, variable_name: str) -> "StatementCollection":
+        """Filter statements that influence a specific variable."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+
+        tracker = VariableTracker()
+        filtered = []
+
+        for stmt in self._elements:
+            # Check if statement influences the variable
+            references = tracker.get_variable_references(variable_name)
+            for ref in references:
+                if ref.statement == stmt and ref.is_write:
+                    filtered.append(stmt)
+                    break
+
+        return self._create_new_collection(filtered)
+
+    def influenced_by_pattern(self, pattern: str) -> "StatementCollection":
+        """Filter statements influenced by statements matching pattern."""
+        # Find statements matching the pattern
+        source_statements = self._engine.find_statements(**{})
+        pattern_statements = []
+
+        for stmt in source_statements:
+            source_code = stmt.get_source_code()
+            if self._engine.pattern_matcher.matches_text_pattern(source_code, pattern):
+                pattern_statements.append(stmt)
+
+        # Find statements influenced by pattern statements
+        filtered = []
+        for stmt in self._elements:
+            for pattern_stmt in pattern_statements:
+                # Check if there's a data flow connection
+                try:
+                    paths = pattern_stmt.traces_to(stmt)
+                    if paths:
+                        filtered.append(stmt)
+                        break
+                except:
+                    # If data flow analysis fails, skip
+                    continue
+
+        return self._create_new_collection(filtered)
+
+    def connected_to(self, other_collection: "StatementCollection") -> "StatementCollection":
+        """Filter statements that have data flow connections to other collection."""
+        filtered = []
+        other_statements = other_collection.list()
+
+        for stmt in self._elements:
+            for other_stmt in other_statements:
+                try:
+                    # Check for data flow connection in either direction
+                    forward_paths = stmt.traces_to(other_stmt)
+                    backward_paths = other_stmt.traces_to(stmt)
+                    if forward_paths or backward_paths:
+                        filtered.append(stmt)
+                        break
+                except:
+                    # If data flow analysis fails, skip
+                    continue
+
+        return self._create_new_collection(filtered)
+
+    def expand_backward_flow(self, max_depth: int = 3) -> "StatementCollection":
+        """Expand collection to include statements that influence current ones."""
+        # Use list and check for duplicates instead of set (statements are not hashable)
+        all_statements = list(self._elements)
+        seen_ids = {id(stmt) for stmt in self._elements}
+
+        for stmt in self._elements:
+            try:
+                backward_points = stmt.get_data_flow_backward(max_depth)
+                for point in backward_points:
+                    if (hasattr(point, 'node') and isinstance(point.node, Statement)
+                        and id(point.node) not in seen_ids):
+                        all_statements.append(point.node)
+                        seen_ids.add(id(point.node))
+            except:
+                # If data flow analysis fails, skip
+                continue
+
+        return self._create_new_collection(all_statements)
+
+    def expand_forward_flow(self, max_depth: int = 3) -> "StatementCollection":
+        """Expand collection to include statements influenced by current ones."""
+        # Use list and check for duplicates instead of set (statements are not hashable)
+        all_statements = list(self._elements)
+        seen_ids = {id(stmt) for stmt in self._elements}
+
+        for stmt in self._elements:
+            try:
+                forward_points = stmt.get_data_flow_forward(max_depth)
+                for point in forward_points:
+                    if (hasattr(point, 'node') and isinstance(point.node, Statement)
+                        and id(point.node) not in seen_ids):
+                        all_statements.append(point.node)
+                        seen_ids.add(id(point.node))
+            except:
+                # If data flow analysis fails, skip
+                continue
+
+        return self._create_new_collection(all_statements)
 
 
 class ExpressionCollection(BaseCollection):

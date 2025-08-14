@@ -12,6 +12,8 @@ from sol_query.models.source_location import SourceLocation
 
 if TYPE_CHECKING:
     from sol_query.core.parser import SolidityParser
+    from sol_query.analysis.data_flow import DataFlowPoint
+    from sol_query.analysis.variable_tracker import VariableReference
 
 
 class Visibility(str, Enum):
@@ -97,6 +99,82 @@ class ASTNode(BaseModel, ABC):
     def get_source_code(self) -> str:
         """Get the source code for this node."""
         return self.source_location.source_text
+
+    def get_data_flow_backward(self, max_depth: int = 5) -> List['DataFlowPoint']:
+        """Get data flow points that influence this node (backward analysis)."""
+        # This will be implemented by the data flow analyzer
+        from sol_query.analysis.data_flow import DataFlowAnalyzer
+        analyzer = DataFlowAnalyzer()
+
+        # Find the containing function
+        containing_function = self._find_containing_function()
+        if not containing_function:
+            return []
+
+        # Get the data flow graph for the function
+        graph = analyzer.analyze_function(containing_function)
+
+        # Find data flow points for this node
+        matching_points = []
+        for point in graph.points:
+            if point.node == self:
+                matching_points.extend(graph.get_backward_flow(point, max_depth))
+
+        return matching_points
+
+    def get_data_flow_forward(self, max_depth: int = 5) -> List['DataFlowPoint']:
+        """Get data flow points influenced by this node (forward analysis)."""
+        # This will be implemented by the data flow analyzer
+        from sol_query.analysis.data_flow import DataFlowAnalyzer
+        analyzer = DataFlowAnalyzer()
+
+        # Find the containing function
+        containing_function = self._find_containing_function()
+        if not containing_function:
+            return []
+
+        # Get the data flow graph for the function
+        graph = analyzer.analyze_function(containing_function)
+
+        # Find data flow points for this node
+        matching_points = []
+        for point in graph.points:
+            if point.node == self:
+                matching_points.extend(graph.get_forward_flow(point, max_depth))
+
+        return matching_points
+
+    def traces_to(self, target_node: 'ASTNode') -> List[List['DataFlowPoint']]:
+        """Find data flow paths from this node to the target node."""
+        from sol_query.analysis.data_flow import DataFlowAnalyzer
+        analyzer = DataFlowAnalyzer()
+
+        # Find the containing function
+        containing_function = self._find_containing_function()
+        if not containing_function:
+            return []
+
+        # Get the data flow graph for the function
+        graph = analyzer.analyze_function(containing_function)
+
+        # Find source and target points
+        source_points = [p for p in graph.points if p.node == self]
+        target_points = [p for p in graph.points if p.node == target_node]
+
+        all_paths = []
+        for source in source_points:
+            for target in target_points:
+                paths = graph.find_flow_paths(source, target)
+                all_paths.extend(paths)
+
+        return all_paths
+
+    def _find_containing_function(self) -> Optional['FunctionDeclaration']:
+        """Find the function that contains this node."""
+        # This is a simplified implementation - in a real system,
+        # you'd traverse the AST hierarchy to find the containing function
+        # For now, we'll return None and let the analyzer handle it
+        return None
 
     def get_children(self) -> List["ASTNode"]:
         """Get child nodes. Override in subclasses."""
@@ -309,6 +387,24 @@ class VariableDeclaration(ASTNode):
         description="Reference to the parent contract",
         exclude=True  # Exclude from serialization to avoid circular references
     )
+
+    def get_all_references(self) -> List['VariableReference']:
+        """Get all references to this variable."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+        tracker = VariableTracker()
+        return tracker.get_variable_references(self.name)
+
+    def get_reads(self) -> List['VariableReference']:
+        """Get all read references to this variable."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+        tracker = VariableTracker()
+        return tracker.get_variable_reads(self.name)
+
+    def get_writes(self) -> List['VariableReference']:
+        """Get all write references to this variable."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+        tracker = VariableTracker()
+        return tracker.get_variable_writes(self.name)
 
     def is_state_variable(self) -> bool:
         """Check if this is a state variable."""

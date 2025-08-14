@@ -2007,3 +2007,206 @@ class SolidityQueryEngine:
                 analysis['cyclomatic_complexity'] += max(1, len(nested) // 10)
 
         return analysis
+
+    # Data Flow Analysis Methods
+    def trace_variable_flow(self,
+                           variable_name: str,
+                           direction: str = 'forward',  # 'forward', 'backward', 'both'
+                           function_name: Optional[str] = None,
+                           contract_name: Optional[str] = None,
+                           max_depth: int = 5) -> List[Statement]:
+        """Trace how a variable flows through the code."""
+        from sol_query.analysis.data_flow import DataFlowAnalyzer
+
+        analyzer = DataFlowAnalyzer()
+
+        # Find the target function if specified
+        target_function = None
+        if function_name:
+            functions = self.find_functions(name_patterns=[function_name])
+            if contract_name:
+                functions = [f for f in functions
+                           if f.parent_contract and f.parent_contract.name == contract_name]
+            if functions:
+                target_function = functions[0]
+
+        # Trace the variable flow
+        flow_points = analyzer.trace_variable_flow(
+            variable_name=variable_name,
+            direction=direction,
+            function=target_function,
+            max_depth=max_depth
+        )
+
+        # Convert flow points to statements
+        statements = []
+        for point in flow_points:
+            if hasattr(point, 'node') and isinstance(point.node, Statement):
+                statements.append(point.node)
+
+        return statements
+
+    def find_variable_influences(self,
+                                variable_name: str,
+                                function_name: Optional[str] = None,
+                                contract_name: Optional[str] = None,
+                                **filters) -> List[Statement]:
+        """Find all statements that influence a variable's value (backward flow)."""
+        return self.trace_variable_flow(
+            variable_name=variable_name,
+            direction='backward',
+            function_name=function_name,
+            contract_name=contract_name,
+            **filters
+        )
+
+    def find_variable_effects(self,
+                             variable_name: str,
+                             function_name: Optional[str] = None,
+                             contract_name: Optional[str] = None,
+                             **filters) -> List[Statement]:
+        """Find all statements affected by a variable's value (forward flow)."""
+        return self.trace_variable_flow(
+            variable_name=variable_name,
+            direction='forward',
+            function_name=function_name,
+            contract_name=contract_name,
+            **filters
+        )
+
+    def trace_flow_between_statements(self,
+                                     from_pattern: str,  # e.g., "require*", "*.call(*)"
+                                     to_pattern: str,
+                                     function_name: Optional[str] = None,
+                                     contract_name: Optional[str] = None,
+                                     **filters) -> List[List[Statement]]:
+        """Find data flow paths between statement types."""
+        # Find statements matching patterns
+        all_statements = self.find_statements(**filters)
+
+        if function_name:
+            functions = self.find_functions(name_patterns=[function_name])
+            if contract_name:
+                functions = [f for f in functions
+                           if f.parent_contract and f.parent_contract.name == contract_name]
+            if functions:
+                # Filter statements to only those in the target function
+                target_function = functions[0]
+                function_statements = self.find_statements(function_name=function_name, **filters)
+                all_statements = [s for s in all_statements if s in function_statements]
+
+        from_statements = []
+        to_statements = []
+
+        for stmt in all_statements:
+            source_code = stmt.get_source_code()
+            if self.pattern_matcher.matches_text_pattern(source_code, from_pattern):
+                from_statements.append(stmt)
+            if self.pattern_matcher.matches_text_pattern(source_code, to_pattern):
+                to_statements.append(stmt)
+
+        # Find data flow paths between matching statements
+        all_paths = []
+        for from_stmt in from_statements:
+            for to_stmt in to_statements:
+                try:
+                    paths = from_stmt.traces_to(to_stmt)
+                    all_paths.extend(paths)
+                except:
+                    # If data flow analysis fails, skip
+                    continue
+
+        # Convert data flow points to statements
+        statement_paths = []
+        for path in all_paths:
+            stmt_path = []
+            for point in path:
+                if hasattr(point, 'node') and isinstance(point.node, Statement):
+                    stmt_path.append(point.node)
+            if stmt_path:
+                statement_paths.append(stmt_path)
+
+        return statement_paths
+
+    def find_data_flow_paths(self, from_point: ASTNode, to_point: ASTNode) -> List[List[Statement]]:
+        """Find all data flow paths between two AST nodes."""
+        try:
+            paths = from_point.traces_to(to_point)
+
+            # Convert data flow points to statements
+            statement_paths = []
+            for path in paths:
+                stmt_path = []
+                for point in path:
+                    if hasattr(point, 'node') and isinstance(point.node, Statement):
+                        stmt_path.append(point.node)
+                if stmt_path:
+                    statement_paths.append(stmt_path)
+
+            return statement_paths
+        except:
+            return []
+
+    def get_variable_references_by_function(self, function: FunctionDeclaration) -> Dict[str, List]:
+        """Get all variable references within a function, organized by variable name."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+
+        tracker = VariableTracker()
+        references = tracker.track_function(function)
+
+        # Organize by variable name
+        by_variable = {}
+        for ref in references:
+            if ref.variable_name not in by_variable:
+                by_variable[ref.variable_name] = []
+            by_variable[ref.variable_name].append(ref.to_dict())
+
+        return by_variable
+
+    def get_data_flow_statistics(self) -> Dict[str, Any]:
+        """Get statistics about data flow analysis across the codebase."""
+        from sol_query.analysis.variable_tracker import VariableTracker
+        from sol_query.analysis.data_flow import DataFlowAnalyzer
+
+        tracker = VariableTracker()
+        analyzer = DataFlowAnalyzer()
+
+        # Analyze all functions
+        all_functions = self.find_functions()
+        stats = {
+            'total_functions': len(all_functions),
+            'functions_analyzed': 0,
+            'total_variables': 0,
+            'total_references': 0,
+            'variables_by_function': {},
+            'data_flow_complexity': {}
+        }
+
+        for func in all_functions:
+            try:
+                # Track variables
+                references = tracker.track_function(func)
+                func_variables = tracker.get_function_variables(func)
+
+                stats['functions_analyzed'] += 1
+                stats['total_variables'] += len(func_variables)
+                stats['total_references'] += len(references)
+                stats['variables_by_function'][func.name] = {
+                    'variable_count': len(func_variables),
+                    'reference_count': len(references),
+                    'variables': list(func_variables)
+                }
+
+                # Analyze data flow complexity
+                graph = analyzer.analyze_function(func)
+                stats['data_flow_complexity'][func.name] = {
+                    'data_flow_points': len(graph.points),
+                    'data_flow_edges': len(graph.edges),
+                    'variable_points': len(graph.variable_points)
+                }
+
+            except Exception as e:
+                # Skip functions that can't be analyzed
+                continue
+
+        return stats

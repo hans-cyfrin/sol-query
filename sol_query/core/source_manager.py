@@ -348,28 +348,6 @@ class SourceManager:
             source_file.parse_errors.append(error)
             logger.error(f"Unexpected error parsing {source_file.path}: {e}")
 
-    def _extract_imports(self, content: str) -> List[str]:
-        """Extract import statements from source content (simplified)."""
-        imports = []
-        lines = content.split('\n')
-
-        for line in lines:
-            line = line.strip()
-            if line.startswith('import ') and ('"' in line or "'" in line):
-                # Extract import path (simplified)
-                if '"' in line:
-                    start = line.find('"') + 1
-                    end = line.find('"', start)
-                    if end > start:
-                        imports.append(line[start:end])
-                elif "'" in line:
-                    start = line.find("'") + 1
-                    end = line.find("'", start)
-                    if end > start:
-                        imports.append(line[start:end])
-
-        return imports
-
     def _perform_contextual_analysis(self) -> None:
         """
         Perform contextual analysis on all loaded contracts.
@@ -384,8 +362,7 @@ class SourceManager:
         # For each file, perform contextual analysis
         for source_file in self.files.values():
             if source_file.ast:
-                # Find the AST builder used for this file (we need to recreate it)
-                from sol_query.core.ast_builder import ASTBuilder
+                # Recreate AST builder for this file
                 ast_builder = ASTBuilder(self.parser, source_file.content, source_file.path)
 
                 # Perform contextual analysis on contracts in this file

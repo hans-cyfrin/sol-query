@@ -497,7 +497,7 @@ class ASTBuilder:
             source_location=self._get_source_location(node),
             raw_node=node,
             name=name,
-            members=members
+            fields=members
         )
 
     def _build_enum(self, node: tree_sitter.Node) -> EnumDeclaration:
@@ -834,11 +834,15 @@ class ASTBuilder:
             # Try to determine if it looks like a specific expression type
             text_clean = text.strip()
             if '(' in text_clean and ')' in text_clean and not text_clean.startswith('('):
-                # Looks like a function call
+                # Looks like a function call - create with identifier as function
+                func_name = text_clean.split('(')[0]
                 return CallExpression(
                     source_location=self._get_source_location(node),
                     raw_node=node,
-                    function_name=text_clean,
+                    function=Identifier(
+                        source_location=self._get_source_location(node),
+                        name=func_name
+                    ),
                     arguments=[]
                 )
             else:

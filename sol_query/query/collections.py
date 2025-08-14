@@ -13,6 +13,9 @@ from sol_query.analysis.call_types import CallType
 
 if TYPE_CHECKING:
     from sol_query.query.engine import SolidityQueryEngine
+    from sol_query.analysis.call_analyzer import CallAnalyzer
+    from sol_query.analysis.variable_tracker import VariableTracker
+    from sol_query.analysis.data_flow import DataFlowAnalyzer
 
 
 class BaseCollection(ABC):
@@ -570,6 +573,7 @@ class FunctionCollection(BaseCollection):
         Filter functions whose call tree includes any external calls (deep analysis).
         This analyzes the entire call chain to find functions that may indirectly make external calls.
         """
+        # Import here to avoid circular imports
         from sol_query.analysis.call_analyzer import CallAnalyzer
         analyzer = CallAnalyzer()
         all_functions = self._engine._get_all_functions()
@@ -585,6 +589,7 @@ class FunctionCollection(BaseCollection):
         """
         Filter functions whose call tree does NOT include any external calls (deep analysis).
         """
+        # Import here to avoid circular imports
         from sol_query.analysis.call_analyzer import CallAnalyzer
         analyzer = CallAnalyzer()
         all_functions = self._engine._get_all_functions()
@@ -601,6 +606,7 @@ class FunctionCollection(BaseCollection):
         Filter functions whose call tree includes any asset transfers (deep analysis).
         This analyzes the entire call chain to find functions that may indirectly transfer assets.
         """
+        # Import here to avoid circular imports
         from sol_query.analysis.call_analyzer import CallAnalyzer
         analyzer = CallAnalyzer()
         all_functions = self._engine._get_all_functions()
@@ -616,6 +622,7 @@ class FunctionCollection(BaseCollection):
         """
         Filter functions whose call tree does NOT include any asset transfers (deep analysis).
         """
+        # Import here to avoid circular imports
         from sol_query.analysis.call_analyzer import CallAnalyzer
         analyzer = CallAnalyzer()
         all_functions = self._engine._get_all_functions()
@@ -705,6 +712,7 @@ class FunctionCollection(BaseCollection):
     # Data flow methods
     def with_data_flow_between(self, from_variable: str, to_variable: str) -> "FunctionCollection":
         """Functions where data flows from one variable to another."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
         tracker = VariableTracker()
         filtered = []
@@ -725,6 +733,7 @@ class FunctionCollection(BaseCollection):
 
     def reading_variable(self, variable_name: str) -> "FunctionCollection":
         """Functions that read a specific variable."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
 
         tracker = VariableTracker()
@@ -739,6 +748,7 @@ class FunctionCollection(BaseCollection):
 
     def writing_variable(self, variable_name: str) -> "FunctionCollection":
         """Functions that modify a specific variable."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
 
         tracker = VariableTracker()
@@ -974,7 +984,9 @@ class StatementCollection(BaseCollection):
     # Data flow methods
     def influenced_by_variable(self, variable_name: str) -> "StatementCollection":
         """Filter statements influenced by a specific variable."""
+        # Import here to avoid circular imports
         from sol_query.analysis.data_flow import DataFlowAnalyzer
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
 
         tracker = VariableTracker()
@@ -992,6 +1004,7 @@ class StatementCollection(BaseCollection):
 
     def influencing_variable(self, variable_name: str) -> "StatementCollection":
         """Filter statements that influence a specific variable."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
 
         tracker = VariableTracker()

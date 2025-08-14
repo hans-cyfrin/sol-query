@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Pattern, Callable, Type
+from typing import Any, Dict, List, Optional, Union, Pattern, Callable, Type, TYPE_CHECKING
 
 from sol_query.core.source_manager import SourceManager
 from sol_query.core.ast_nodes import (
@@ -16,6 +16,12 @@ from sol_query.query.collections import (
 )
 from sol_query.utils.pattern_matching import PatternMatcher
 from sol_query.analysis.call_types import CallType
+
+if TYPE_CHECKING:
+    from sol_query.analysis.call_analyzer import CallAnalyzer
+    from sol_query.analysis.variable_tracker import VariableTracker
+    from sol_query.analysis.data_flow import DataFlowAnalyzer
+    from sol_query.analysis.import_analyzer import ImportAnalyzer
 
 
 class SolidityQueryEngine:
@@ -1048,6 +1054,7 @@ class SolidityQueryEngine:
 
         # Filter by external calls (deep)
         if with_external_calls_deep is not None:
+            # Import here to avoid circular imports
             from sol_query.analysis.call_analyzer import CallAnalyzer
             analyzer = CallAnalyzer()
             all_functions = self._get_all_functions()
@@ -1060,6 +1067,7 @@ class SolidityQueryEngine:
 
         # Filter by asset transfers (deep)
         if with_asset_transfers_deep is not None:
+            # Import here to avoid circular imports
             from sol_query.analysis.call_analyzer import CallAnalyzer
             analyzer = CallAnalyzer()
             all_functions = self._get_all_functions()
@@ -2021,6 +2029,7 @@ class SolidityQueryEngine:
                            contract_name: Optional[str] = None,
                            max_depth: int = 5) -> List[Statement]:
         """Trace how a variable flows through the code."""
+        # Import here to avoid circular imports
         from sol_query.analysis.data_flow import DataFlowAnalyzer
 
         analyzer = DataFlowAnalyzer()
@@ -2154,6 +2163,7 @@ class SolidityQueryEngine:
 
     def get_variable_references_by_function(self, function: FunctionDeclaration) -> Dict[str, List]:
         """Get all variable references within a function, organized by variable name."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
 
         tracker = VariableTracker()
@@ -2170,7 +2180,9 @@ class SolidityQueryEngine:
 
     def get_data_flow_statistics(self) -> Dict[str, Any]:
         """Get statistics about data flow analysis across the codebase."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
+        # Import here to avoid circular imports
         from sol_query.analysis.data_flow import DataFlowAnalyzer
 
         tracker = VariableTracker()
@@ -2383,6 +2395,7 @@ class SolidityQueryEngine:
 
     def import_analyzer(self):
         """Get an import analyzer instance for dependency analysis."""
+        # Import here to avoid circular imports
         from sol_query.analysis.import_analyzer import ImportAnalyzer
         return ImportAnalyzer(self.source_manager)
 

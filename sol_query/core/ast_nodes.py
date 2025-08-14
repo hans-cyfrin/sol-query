@@ -88,7 +88,11 @@ class NodeType(str, Enum):
 
 
 class ASTNode(BaseModel, ABC):
-    """Base class for all AST nodes."""
+    """Base class for all AST nodes.
+    
+    Provides core functionality for representing Solidity AST elements,
+    including source location tracking, data flow analysis, and serialization.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -100,13 +104,24 @@ class ASTNode(BaseModel, ABC):
         description="Original tree-sitter node (excluded from serialization)"
     )
 
+    # Public API methods
     def get_source_code(self) -> str:
         """Get the source code for this node."""
         return self.source_location.source_text
+    
+    def get_children(self) -> List["ASTNode"]:
+        """Get child nodes. Override in subclasses."""
+        return []
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return self.model_dump(exclude={"raw_node"})
+
+    # Data flow analysis methods
 
     def get_data_flow_backward(self, max_depth: int = 5) -> List['DataFlowPoint']:
         """Get data flow points that influence this node (backward analysis)."""
-        # This will be implemented by the data flow analyzer
+        # Import here to avoid circular imports
         from sol_query.analysis.data_flow import DataFlowAnalyzer
         analyzer = DataFlowAnalyzer()
 
@@ -128,7 +143,7 @@ class ASTNode(BaseModel, ABC):
 
     def get_data_flow_forward(self, max_depth: int = 5) -> List['DataFlowPoint']:
         """Get data flow points influenced by this node (forward analysis)."""
-        # This will be implemented by the data flow analyzer
+        # Import here to avoid circular imports
         from sol_query.analysis.data_flow import DataFlowAnalyzer
         analyzer = DataFlowAnalyzer()
 
@@ -150,6 +165,7 @@ class ASTNode(BaseModel, ABC):
 
     def traces_to(self, target_node: 'ASTNode') -> List[List['DataFlowPoint']]:
         """Find data flow paths from this node to the target node."""
+        # Import here to avoid circular imports
         from sol_query.analysis.data_flow import DataFlowAnalyzer
         analyzer = DataFlowAnalyzer()
 
@@ -173,20 +189,13 @@ class ASTNode(BaseModel, ABC):
 
         return all_paths
 
+    # Private helper methods
     def _find_containing_function(self) -> Optional['FunctionDeclaration']:
         """Find the function that contains this node."""
         # This is a simplified implementation - in a real system,
         # you'd traverse the AST hierarchy to find the containing function
         # For now, we'll return None and let the analyzer handle it
         return None
-
-    def get_children(self) -> List["ASTNode"]:
-        """Get child nodes. Override in subclasses."""
-        return []
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return self.model_dump(exclude={"raw_node"})
 
 
 class ContractDeclaration(ASTNode):
@@ -368,6 +377,10 @@ class Parameter(ASTNode):
     node_type: NodeType = Field(default=NodeType.VARIABLE, frozen=True)
     name: str = Field(description="Parameter name")
     type_name: str = Field(description="Parameter type")
+    storage_location: Optional[str] = Field(
+        default=None,
+        description="Storage location (memory, storage, calldata)"
+    )
 
 
 class VariableDeclaration(ASTNode):
@@ -394,18 +407,21 @@ class VariableDeclaration(ASTNode):
 
     def get_all_references(self) -> List['VariableReference']:
         """Get all references to this variable."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
         tracker = VariableTracker()
         return tracker.get_variable_references(self.name)
 
     def get_reads(self) -> List['VariableReference']:
         """Get all read references to this variable."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
         tracker = VariableTracker()
         return tracker.get_variable_reads(self.name)
 
     def get_writes(self) -> List['VariableReference']:
         """Get all write references to this variable."""
+        # Import here to avoid circular imports
         from sol_query.analysis.variable_tracker import VariableTracker
         tracker = VariableTracker()
         return tracker.get_variable_writes(self.name)
@@ -616,6 +632,7 @@ class CallExpression(Expression):
         """Get the type of this call, analyzing if not already set."""
         if self.call_type is not None:
             # Convert string back to CallType if needed
+            # Import here to avoid circular imports
             from sol_query.analysis.call_types import CallType
             if isinstance(self.call_type, str):
                 try:
@@ -626,6 +643,7 @@ class CallExpression(Expression):
 
         # Lazy analysis if call type not set
         try:
+            # Import here to avoid circular imports
             from sol_query.analysis.call_analyzer import CallAnalyzer
             analyzer = CallAnalyzer()
             call_type = analyzer.analyze_call_type(self)
@@ -640,6 +658,7 @@ class CallExpression(Expression):
         if call_type is None:
             return False
 
+        # Import here to avoid circular imports
         from sol_query.analysis.call_types import CallType
         return call_type in {CallType.EXTERNAL, CallType.LOW_LEVEL, CallType.DELEGATE, CallType.STATIC}
 
@@ -649,18 +668,21 @@ class CallExpression(Expression):
         if call_type is None:
             return False
 
+        # Import here to avoid circular imports
         from sol_query.analysis.call_types import CallType
         return call_type in {CallType.INTERNAL, CallType.PRIVATE, CallType.PUBLIC}
 
     def is_library_call(self) -> bool:
         """Check if this is a library call."""
         call_type = self.get_call_type()
+        # Import here to avoid circular imports
         from sol_query.analysis.call_types import CallType
         return call_type == CallType.LIBRARY
 
     def is_low_level_call(self) -> bool:
         """Check if this is a low-level call."""
         call_type = self.get_call_type()
+        # Import here to avoid circular imports
         from sol_query.analysis.call_types import CallType
         return call_type in {CallType.LOW_LEVEL, CallType.DELEGATE, CallType.STATIC}
 
@@ -685,6 +707,7 @@ class CallExpression(Expression):
 
     def get_call_info(self):
         """Get structured metadata about this call."""
+        # Import here to avoid circular imports
         from sol_query.analysis.call_metadata import CallMetadata
         return CallMetadata(self)
 

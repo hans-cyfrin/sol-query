@@ -107,6 +107,23 @@ class ASTBuilder:
         root_node = tree.root_node
         return self._build_children(root_node)
 
+    def perform_contextual_analysis(self, contracts: List) -> None:
+        """
+        Perform contextual analysis on all functions after contracts are built.
+        This provides more accurate external call detection.
+        
+        Args:
+            contracts: List of all contracts in the codebase
+        """
+        for contract in contracts:
+            if hasattr(contract, 'functions'):
+                # Build context for this contract
+                context = self.call_analyzer.build_contract_context(contract, contracts)
+
+                # Re-analyze all functions in this contract with full context
+                for function in contract.functions:
+                    self.call_analyzer.analyze_function(function, context)
+
     def build_node(self, node: tree_sitter.Node) -> Optional[ASTNode]:
         """
         Build a single AST node from a tree-sitter node.
@@ -319,7 +336,8 @@ class ASTBuilder:
             body=body
         )
 
-        # Analyze function for external calls and asset transfers
+        # Note: We'll analyze calls later when we have full contract context
+        # For now, just do basic analysis
         self.call_analyzer.analyze_function(function)
 
         return function

@@ -524,6 +524,180 @@ class SolidityQueryEngine:
 
         return self._filter_expressions(unary_ops, None, **filters)
 
+    # Enhanced traditional finder methods
+    def find_expressions_with_operator(self,
+                                     operators: Union[str, List[str]],
+                                     contract_name: Optional[str] = None,
+                                     function_name: Optional[str] = None,
+                                     **filters: Any) -> List[Expression]:
+        """
+        Find expressions with specific operators.
+        
+        Args:
+            operators: Operators to match (+, -, *, ==, !=, etc.)
+            contract_name: Name of contract to search in
+            function_name: Name of function to search in
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching expressions
+        """
+        expressions = self._get_all_expressions(contract_name, function_name)
+        op_list = [operators] if isinstance(operators, str) else operators
+        filtered = [e for e in expressions if hasattr(e, 'operator') and e.operator in op_list]
+        return self._filter_expressions(filtered, None, **filters)
+
+    def find_expressions_with_value(self,
+                                  value: Union[str, int, float],
+                                  contract_name: Optional[str] = None,
+                                  function_name: Optional[str] = None,
+                                  **filters: Any) -> List[Expression]:
+        """
+        Find literal expressions with specific values.
+        
+        Args:
+            value: Value to match
+            contract_name: Name of contract to search in
+            function_name: Name of function to search in
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching literal expressions
+        """
+        expressions = self._get_all_expressions(contract_name, function_name)
+        value_str = str(value)
+        filtered = [e for e in expressions if hasattr(e, 'value') and e.value == value_str]
+        return self._filter_expressions(filtered, None, **filters)
+
+    def find_expressions_accessing_member(self,
+                                        member_name: str,
+                                        contract_name: Optional[str] = None,
+                                        function_name: Optional[str] = None,
+                                        **filters: Any) -> List[Expression]:
+        """
+        Find expressions that access a specific member.
+        
+        Args:
+            member_name: Member name to find (e.g., 'balance', 'length')
+            contract_name: Name of contract to search in
+            function_name: Name of function to search in
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching expressions
+        """
+        expressions = self._get_all_expressions(contract_name, function_name)
+        filtered = []
+        for expr in expressions:
+            source_code = expr.get_source_code()
+            if f".{member_name}" in source_code:
+                filtered.append(expr)
+        return self._filter_expressions(filtered, None, **filters)
+
+    def find_functions_with_source_pattern(self,
+                                         pattern: Union[str, Pattern],
+                                         contract_name: Optional[str] = None,
+                                         **filters: Any) -> List[FunctionDeclaration]:
+        """
+        Find functions containing specific patterns in their source code.
+        
+        Args:
+            pattern: Pattern to match in source code
+            contract_name: Name of contract to search in
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching functions
+        """
+        functions = self._get_all_functions(contract_name)
+        filtered = []
+        for func in functions:
+            source_code = func.get_source_code()
+            if self.pattern_matcher.matches_text_pattern(source_code, pattern):
+                filtered.append(func)
+        return self._filter_functions(filtered, None, None, None, None, contract_name, **filters)
+
+    def find_functions_with_time_operations(self,
+                                          contract_name: Optional[str] = None,
+                                          **filters: Any) -> List[FunctionDeclaration]:
+        """
+        Find functions that contain time-related operations.
+        
+        Args:
+            contract_name: Name of contract to search in
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching functions
+        """
+        time_patterns = [
+            r"block\.timestamp",
+            r"now\b",
+            r"\btimestamp\b",
+            r"\bduration\b",
+            r"\bdeadline\b",
+            r"\bexpiry\b",
+            r"\btimeout\b"
+        ]
+        functions = self._get_all_functions(contract_name)
+        filtered = []
+        for func in functions:
+            source_code = func.get_source_code()
+            if any(self.pattern_matcher.matches_text_pattern(source_code, pattern)
+                   for pattern in time_patterns):
+                filtered.append(func)
+        return self._filter_functions(filtered, None, None, None, None, contract_name, **filters)
+
+    def find_variables_time_related(self,
+                                   contract_name: Optional[str] = None,
+                                   **filters: Any) -> List[VariableDeclaration]:
+        """
+        Find time-related variables.
+        
+        Args:
+            contract_name: Name of contract to search in
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching variables
+        """
+        variables = self._get_all_variables(contract_name)
+        time_name_patterns = [
+            "*timestamp*", "*time*", "*duration*", "*deadline*",
+            "*expiry*", "*timeout*", "*delay*", "*period*"
+        ]
+        filtered = []
+        for var in variables:
+            if any(self.pattern_matcher.matches_name_pattern(var.name, pattern)
+                   for pattern in time_name_patterns):
+                filtered.append(var)
+        return self._filter_variables(filtered, None, None, None, contract_name, **filters)
+
+    def find_statements_with_source_pattern(self,
+                                           pattern: Union[str, Pattern],
+                                           contract_name: Optional[str] = None,
+                                           function_name: Optional[str] = None,
+                                           **filters: Any) -> List[Statement]:
+        """
+        Find statements containing specific patterns in their source code.
+        
+        Args:
+            pattern: Pattern to match in source code
+            contract_name: Name of contract to search in
+            function_name: Name of function to search in
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching statements
+        """
+        statements = self._get_all_statements(contract_name, function_name)
+        filtered = []
+        for stmt in statements:
+            source_code = stmt.get_source_code()
+            if self.pattern_matcher.matches_text_pattern(source_code, pattern):
+                filtered.append(stmt)
+        return self._filter_statements(filtered, None, **filters)
+
     # Fluent collection access points (Glider-inspired)
     @property
     def contracts(self) -> ContractCollection:

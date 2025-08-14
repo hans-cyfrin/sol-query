@@ -78,27 +78,32 @@ class CallAnalyzer:
             'withdraw', 'deposit', 'mint', 'burn'
         }
 
-    def analyze_function(self, function: FunctionDeclaration) -> None:
+    def analyze_function(self, function: FunctionDeclaration, contract_context: Optional[Dict] = None) -> None:
         """
         Analyze a function for external calls and asset transfers.
         Updates the function's metadata fields.
         
         Args:
             function: The function to analyze
+            contract_context: Context about the current contract and available functions
         """
         if not function.body:
             return
 
+        # Build contract context if not provided
+        if contract_context is None:
+            contract_context = self._build_basic_context(function)
+
         # Extract all expressions from the function
         expressions = self._extract_all_expressions(function)
 
-        # Analyze for external calls
-        external_calls = self._detect_external_calls(expressions, function)
+        # Analyze for external calls with context
+        external_calls = self._detect_external_calls_contextual(expressions, function, contract_context)
         function.has_external_calls = len(external_calls) > 0
         function.external_call_targets = list(external_calls)
 
-        # Analyze for asset transfers
-        asset_transfers = self._detect_asset_transfers(expressions, function)
+        # Analyze for asset transfers with context
+        asset_transfers = self._detect_asset_transfers_contextual(expressions, function, contract_context)
         function.has_asset_transfers = len(asset_transfers) > 0
         function.asset_transfer_types = list(asset_transfers)
 
@@ -433,3 +438,308 @@ class CallAnalyzer:
                 called_functions.append(func)
 
         return called_functions
+
+    # ===== CONTEXTUAL ANALYSIS METHODS =====
+
+    def _build_basic_context(self, function: FunctionDeclaration) -> Dict:
+        """
+        Build a basic context for a function when full contract context is not available.
+        
+        Args:
+            function: The function being analyzed
+            
+        Returns:
+            Basic context dictionary
+        """
+        context = {
+            'contract_functions': set(),
+            'inherited_functions': set(),
+            'contract_variables': set(),
+            'is_interface_call': lambda target: self._looks_like_interface_call(target),
+            'is_low_level_call': lambda target: target in ['call', 'delegatecall', 'staticcall']
+        }
+
+        # If we have parent contract info, use it
+        if hasattr(function, 'parent_contract') and function.parent_contract:
+            contract = function.parent_contract
+            context['contract_functions'] = {f.name for f in contract.functions}
+            context['contract_variables'] = {v.name for v in contract.variables}
+
+        return context
+
+    def build_contract_context(self, contract, all_contracts: List) -> Dict:
+        """
+        Build comprehensive contract context for accurate call analysis.
+        
+        Args:
+            contract: The current contract being analyzed
+            all_contracts: All contracts in the codebase
+            
+        Returns:
+            Comprehensive context dictionary
+        """
+        context = {
+            'contract_functions': set(),
+            'inherited_functions': set(),
+            'contract_variables': set(),
+            'contract_name': contract.name,
+            'is_interface_call': lambda target: self._looks_like_interface_call(target),
+            'is_low_level_call': lambda target: target in ['call', 'delegatecall', 'staticcall']
+        }
+
+        # Add current contract functions and variables
+        context['contract_functions'] = {f.name for f in contract.functions}
+        context['contract_variables'] = {v.name for v in contract.variables}
+
+        # Add inherited functions
+        for base_name in contract.inheritance:
+            base_contract = self._find_contract_by_name(base_name, all_contracts)
+            if base_contract:
+                context['inherited_functions'].update(f.name for f in base_contract.functions)
+                # Recursively add inherited functions from base contracts
+                base_context = self.build_contract_context(base_contract, all_contracts)
+                context['inherited_functions'].update(base_context['inherited_functions'])
+
+        return context
+
+    def _find_contract_by_name(self, name: str, contracts: List) -> Optional[ASTNode]:
+        """Find a contract by name in the list of contracts."""
+        for contract in contracts:
+            if hasattr(contract, 'name') and contract.name == name:
+                return contract
+        return None
+
+    def _detect_external_calls_contextual(self, expressions: List[Expression],
+                                        function: FunctionDeclaration,
+                                        context: Dict) -> Set[str]:
+        """
+        Detect external calls using contextual analysis.
+        
+        Args:
+            expressions: List of expressions to analyze
+            function: The function being analyzed
+            context: Contract context information
+            
+        Returns:
+            Set of external call types detected
+        """
+        external_calls = set()
+
+        for expr in expressions:
+            if isinstance(expr, CallExpression):
+                call_info = self._analyze_call_contextually(expr, context)
+                if call_info:
+                    external_calls.add(call_info)
+
+        return external_calls
+
+    def _detect_asset_transfers_contextual(self, expressions: List[Expression],
+                                         function: FunctionDeclaration,
+                                         context: Dict) -> Set[str]:
+        """
+        Detect asset transfers using contextual analysis.
+        
+        Args:
+            expressions: List of expressions to analyze
+            function: The function being analyzed
+            context: Contract context information
+            
+        Returns:
+            Set of asset transfer types detected
+        """
+        asset_transfers = set()
+
+        for expr in expressions:
+            if isinstance(expr, CallExpression):
+                transfer_info = self._analyze_transfer_contextually(expr, context)
+                if transfer_info:
+                    asset_transfers.add(transfer_info)
+
+            # Check for ETH value transfers
+            if self._is_eth_value_transfer(expr):
+                asset_transfers.add('eth_transfer')
+
+        return asset_transfers
+
+    def _analyze_call_contextually(self, call: CallExpression, context: Dict) -> Optional[str]:
+        """
+        Analyze a call expression contextually to determine if it's external.
+        
+        Args:
+            call: The call expression to analyze
+            context: Contract context information
+            
+        Returns:
+            String describing the external call type, or None if internal
+        """
+        if not call.function:
+            return None
+
+        # Parse the call target and function name
+        target, function_name = self._parse_call_target(call)
+
+        # Low-level calls are always external
+        if context['is_low_level_call'](function_name):
+            return f'low_level_call_{function_name}'
+
+        # Direct function calls (no target)
+        if target is None:
+            # Check if function exists in current contract context
+            if (function_name in context['contract_functions'] or
+                function_name in context['inherited_functions']):
+                return None  # Internal call
+            else:
+                # Could be external, but be conservative
+                if function_name in self.external_function_names:
+                    return f'possible_external_call_{function_name}'
+                return None
+
+        # Calls with explicit targets
+        if target == 'this':
+            return None  # Internal call via this
+
+        # Interface calls or contract variable calls
+        if (context['is_interface_call'](target) or
+            self._is_contract_variable_call(target, context)):
+            return f'external_call_{function_name}'
+
+        # Member access that looks external
+        if '.' in str(target) or self._looks_like_external_target(target):
+            return f'external_call_{function_name}'
+
+        return None
+
+    def _analyze_transfer_contextually(self, call: CallExpression, context: Dict) -> Optional[str]:
+        """
+        Analyze a call expression contextually to determine if it's an asset transfer.
+        
+        Args:
+            call: The call expression to analyze
+            context: Contract context information
+            
+        Returns:
+            String describing the transfer type, or None if not a transfer
+        """
+        if not call.function:
+            return None
+
+        target, function_name = self._parse_call_target(call)
+
+        # Check if this is a transfer function
+        if function_name not in self.asset_transfer_function_names:
+            return None
+
+        # Low-level calls with value
+        if function_name in ['call', 'send', 'transfer'] and self._has_value_parameter(call):
+            return 'eth_transfer'
+
+        # Direct function calls
+        if target is None:
+            # Check if it's an internal transfer function
+            if function_name in context['contract_functions']:
+                # Internal function, but might still transfer assets
+                return f'internal_transfer_{function_name}'
+            else:
+                # Likely external transfer
+                return self._classify_transfer_type(function_name)
+
+        # External contract calls
+        if target != 'this' and (context['is_interface_call'](target) or
+                                self._is_contract_variable_call(target, context)):
+            return self._classify_transfer_type(function_name)
+
+        return None
+
+    def _parse_call_target(self, call: CallExpression) -> Tuple[Optional[str], str]:
+        """
+        Parse a call expression to extract the target and function name.
+        
+        Args:
+            call: The call expression to parse
+            
+        Returns:
+            Tuple of (target, function_name)
+        """
+        if not call.function:
+            return None, "unknown"
+
+        # Simple identifier (direct function call)
+        if isinstance(call.function, Identifier):
+            return None, call.function.name
+
+        # Try to get source code and parse it
+        if hasattr(call.function, 'get_source_code'):
+            source = call.function.get_source_code()
+            if '.' in source:
+                parts = source.split('.')
+                if len(parts) >= 2:
+                    target = '.'.join(parts[:-1])
+                    function_name = parts[-1]
+                    return target, function_name
+
+        # Fallback
+        if hasattr(call.function, 'name'):
+            return None, call.function.name
+
+        return None, "unknown"
+
+    def _looks_like_interface_call(self, target: str) -> bool:
+        """Check if a target looks like an interface call."""
+        if not target:
+            return False
+
+        # Interface casting patterns
+        interface_patterns = [
+            r'I[A-Z][a-zA-Z0-9]*\(',  # IERC20(address)
+            r'[A-Z][a-zA-Z0-9]*\(',   # Contract(address)
+        ]
+
+        for pattern in interface_patterns:
+            if re.search(pattern, target):
+                return True
+
+        return False
+
+    def _is_contract_variable_call(self, target: str, context: Dict) -> bool:
+        """Check if target is a contract variable."""
+        if not target:
+            return False
+
+        # Simple variable name
+        if target in context['contract_variables']:
+            return True
+
+        # Could be a more complex expression, be conservative
+        return False
+
+    def _looks_like_external_target(self, target: str) -> bool:
+        """Check if target looks like an external call target."""
+        if not target:
+            return False
+
+        # Common external patterns
+        external_patterns = [
+            r'[a-zA-Z_][a-zA-Z0-9_]*\[',  # array access
+            r'[a-zA-Z_][a-zA-Z0-9_]*\.',  # member access
+            r'address\(',                  # address casting
+            r'payable\(',                  # payable casting
+        ]
+
+        for pattern in external_patterns:
+            if re.search(pattern, target):
+                return True
+
+        return False
+
+    def _classify_transfer_type(self, function_name: str) -> str:
+        """Classify the type of asset transfer based on function name."""
+        if function_name in ['send', 'transfer'] and function_name != 'transfer':
+            return 'eth_transfer'
+        elif function_name in ['transfer', 'transferFrom', 'safeTransfer', 'safeTransferFrom']:
+            return 'token_transfer'
+        elif function_name in ['mint', 'burn']:
+            return 'token_mint_burn'
+        elif function_name in ['deposit', 'withdraw']:
+            return 'asset_movement'
+        else:
+            return f'asset_transfer_{function_name}'

@@ -1,240 +1,348 @@
-# Architecture Overview
+# Sol-Query Architecture
 
-Sol-Query is designed as a comprehensive Solidity code analysis engine built on tree-sitter with a clean, modular architecture.
+Comprehensive Solidity code analysis engine built on tree-sitter with modular, extensible architecture.
 
-## System Architecture
+## System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Sol-Query Engine                         │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────── │
-│  │ Traditional API │  │   Fluent API    │  │   Statistics  │ │
-│  │                 │  │                 │  │               │ │
-│  │ find_contracts  │  │ .contracts      │  │ get_stats()   │ │
-│  │ find_functions  │  │ .functions      │  │ get_names()   │ │
-│  │ find_variables  │  │ .variables      │  │               │ │
-│  │      ...        │  │      ...        │  │               │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────── │
-├─────────────────────────────────────────────────────────────┤
-│                    Query Collections                        │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────── │
-│  │ ContractColln   │  │ FunctionColln   │  │ VariableColln │ │
-│  │                 │  │                 │  │               │ │
-│  │ .with_name()    │  │ .external()     │  │ .public()     │ │
-│  │ .interfaces()   │  │ .view()         │  │ .with_type()  │ │
-│  │ .get_functions()│  │ .with_name()    │  │               │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────── │
-├─────────────────────────────────────────────────────────────┤
-│                      Core Engine                            │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────── │
-│  │   AST Builder   │  │  Pattern Match  │  │  Call Graph   │ │
-│  │                 │  │                 │  │               │ │
-│  │ Tree-sitter     │  │ Wildcards       │  │ find_callers  │ │
-│  │ -> AST Nodes    │  │ Regex Support   │  │ find_callees  │ │
-│  │                 │  │ Exact Match     │  │ call_chains   │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────── │
-├─────────────────────────────────────────────────────────────┤
-│                    Foundation Layer                         │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────── │
-│  │ Source Manager  │  │   AST Nodes     │  │ Serialization │ │
-│  │                 │  │                 │  │               │ │
-│  │ File Loading    │  │ ContractDecl    │  │ JSON Export   │ │
-│  │ Path Resolution │  │ FunctionDecl    │  │ LLM Ready     │ │
-│  │ Caching         │  │ VariableDecl    │  │               │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────── │
-└─────────────────────────────────────────────────────────────┘
-              │                  │                  │
-         ┌────────────┐    ┌─────────────┐    ┌─────────────┐
-         │ tree-sitter│    │   Pydantic  │    │    Python   │
-         │  Solidity  │    │   Models    │    │   Standard  │
-         └────────────┘    └─────────────┘    └─────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     Sol-Query Engine                           │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────────┐ │
+│  │ Traditional API│  │   Fluent API   │  │   Analysis Suite    │ │
+│  │                │  │                │  │                     │ │
+│  │ find_contracts │  │ .contracts     │  │ • Call Graph        │ │
+│  │ find_functions │  │ .functions     │  │ • Data Flow         │ │
+│  │ find_variables │  │ .variables     │  │ • Import Analysis   │ │
+│  │ find_calls     │  │ .expressions   │  │ • Pattern Matching  │ │
+│  │      ...       │  │      ...       │  │ • Serialization     │ │
+│  └────────────────┘  └────────────────┘  └─────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│                    Collection Framework                         │
+│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────────┐ │
+│  │ ContractColln  │  │ FunctionColln  │  │   StatementColln    │ │
+│  │                │  │                │  │                     │ │
+│  │ • with_name()  │  │ • external()   │  │ • loops()           │ │
+│  │ • interfaces() │  │ • view()       │  │ • conditionals()    │ │
+│  │ • inheriting() │  │ • payable()    │  │ • assignments()     │ │
+│  │ • get_funcs()  │  │ • with_calls() │  │ • data_flow()       │ │
+│  └────────────────┘  └────────────────┘  └─────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│                     Analysis Engine                             │
+│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────────┐ │
+│  │ Call Analyzer  │  │  Data Flow     │  │  Import Analyzer    │ │
+│  │                │  │                │  │                     │ │
+│  │ • External     │  │ • Variable     │  │ • Dependencies      │ │
+│  │ • Internal     │  │   Tracking     │  │ • Usage Analysis    │ │
+│  │ • Low-level    │  │ • Flow Paths   │  │ • Symbol Resolution │ │
+│  │ • Asset Xfers  │  │ • Influences   │  │ • Graph Building    │ │
+│  └────────────────┘  └────────────────┘  └─────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│                      Core Engine                               │
+│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────────┐ │
+│  │  AST Builder   │  │ Pattern Match  │  │   Query Engine      │ │
+│  │                │  │                │  │                     │ │
+│  │ • Tree-sitter  │  │ • Wildcards    │  │ • Traditional API   │ │
+│  │ • Node Creation│  │ • Regex        │  │ • Fluent API        │ │
+│  │ • Type Safety  │  │ • Exact Match  │  │ • Collection Ops    │ │
+│  │ • Validation   │  │ • Composition  │  │ • Set Operations    │ │
+│  └────────────────┘  └────────────────┘  └─────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│                    Foundation Layer                            │
+│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────────┐ │
+│  │ Source Manager │  │   AST Nodes    │  │   Serialization     │ │
+│  │                │  │                │  │                     │ │
+│  │ • File Loading │  │ • Contract     │  │ • JSON Export       │ │
+│  │ • Parsing      │  │ • Function     │  │ • LLM Ready         │ │
+│  │ • Caching      │  │ • Variable     │  │ • Configurable      │ │
+│  │ • Dependencies │  │ • Expression   │  │ • Type Safe         │ │
+│  └────────────────┘  └────────────────┘  └─────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+              │                    │                    │
+         ┌──────────────┐    ┌─────────────┐    ┌─────────────────┐
+         │ tree-sitter  │    │   Pydantic  │    │     Python      │
+         │   Solidity   │    │   Models    │    │    Standard     │
+         └──────────────┘    └─────────────┘    └─────────────────┘
 ```
 
 ## Core Components
 
-### 1. Foundation Layer
+### 1. Query Engine (SolidityQueryEngine)
 
-#### Source Manager (`sol_query.core.source_manager`)
-- **File Discovery**: Recursively finds Solidity files in directories
-- **Path Resolution**: Handles relative and absolute paths
-- **Caching**: Optimizes repeated access to source files
-- **Error Handling**: Graceful handling of malformed files
+The main interface providing both traditional functional and fluent object-oriented APIs.
 
-#### AST Nodes (`sol_query.core.ast_nodes`)
-- **Pydantic Models**: Type-safe AST node representations
-- **Source Location**: Precise mapping to source code positions
-- **Node Hierarchy**: Structured representation of Solidity constructs
-- **Serialization**: JSON export for LLM integration
+**Key Features:**
+- Dual API design (traditional + fluent)
+- Source file management and parsing
+- Comprehensive filtering and pattern matching
+- Built-in analysis capabilities
 
-#### Parser (`sol_query.core.parser`)
-- **Tree-sitter Integration**: Leverages tree-sitter-solidity for parsing
-- **Error Recovery**: Handles partial/malformed Solidity code
-- **Performance**: Efficient parsing of large codebases
+**Design Patterns:**
+- Factory pattern for collection creation
+- Strategy pattern for different query styles
+- Observer pattern for parse event handling
 
-### 2. Core Engine
+### 2. Collection Framework
 
-#### AST Builder (`sol_query.core.ast_builder`)
-- **Tree-sitter → AST**: Converts tree-sitter nodes to structured AST
-- **Type Resolution**: Extracts type information from Solidity syntax
-- **Modifier Processing**: Handles visibility, state mutability, custom modifiers
-- **Parameter Extraction**: Parses function/event parameters with types
+Type-safe, chainable collections for different AST element types.
 
-#### Pattern Matching (`sol_query.utils.pattern_matching`)
-- **Wildcard Support**: `*` and `?` patterns for flexible matching
-- **Regex Integration**: Full regex support for complex patterns
-- **Exact Matching**: Optimized exact string matching
-- **Multi-pattern**: Support for lists of patterns
+**Collection Types:**
+- `ContractCollection` - Contract declarations
+- `FunctionCollection` - Function declarations  
+- `VariableCollection` - Variable declarations
+- `ModifierCollection` - Modifier declarations
+- `EventCollection` - Event declarations
+- `StatementCollection` - Statement nodes
+- `ExpressionCollection` - Expression nodes
 
-#### Query Engine (`sol_query.query.engine`)
-- **Unified Interface**: Single engine supporting multiple query paradigms
-- **Traditional Finders**: Direct query methods for all AST elements
-- **Advanced Analysis**: Call graph, reference tracking, pattern matching
-- **Performance Optimization**: Efficient filtering and caching
+**Collection Operations:**
+- **Filtering**: `with_name()`, `external()`, `view()`, etc.
+- **Set Operations**: `union()`, `intersect()`, `subtract()`
+- **Navigation**: `get_functions()`, `get_variables()`, etc.
+- **Composition**: Method chaining and boolean logic
 
-### 3. Query Collections
+### 3. AST Node Hierarchy
 
-#### Collection Architecture
-All collections inherit from `BaseCollection` providing:
-- **Lazy Evaluation**: Operations are chained, executed on demand
-- **Immutable Operations**: Each operation returns a new collection
-- **JSON Serialization**: Built-in support for LLM integration
-- **Python Integration**: Standard Python container protocols
+Pydantic-based type-safe AST representation with rich metadata.
 
-#### Specialized Collections
-- **ContractCollection**: Contract-specific filters and navigation
-- **FunctionCollection**: Function visibility, modifiers, signature matching
-- **VariableCollection**: Type patterns, visibility, state variable filters
-- **ModifierCollection**: Modifier-specific operations
-- **EventCollection**: Event parameter and naming filters
-
-### 4. API Layers
-
-#### Traditional API
-Direct method calls for immediate results:
-```python
-functions = engine.find_functions(visibility="external", modifiers="onlyOwner")
+```
+ASTNode (BaseModel, ABC)
+├── ContractDeclaration
+├── FunctionDeclaration
+├── VariableDeclaration
+├── ModifierDeclaration
+├── EventDeclaration
+├── ErrorDeclaration
+├── StructDeclaration
+├── EnumDeclaration
+├── Statement (ABC)
+│   ├── Block
+│   ├── ReturnStatement
+│   ├── ExpressionStatement
+│   └── GenericStatement
+├── Expression (ABC)
+│   ├── Identifier
+│   ├── Literal
+│   ├── CallExpression
+│   ├── BinaryExpression
+│   ├── ArrayAccess
+│   └── ...
+└── ImportStatement
 ```
 
-#### Fluent API
-Chainable operations for complex queries:
-```python
-functions = engine.functions.external().with_modifiers("onlyOwner").view()
+**Key Properties:**
+- `node_type`: NodeType enum for type identification
+- `source_location`: Precise source position tracking
+- `get_source_code()`: Access to original source text
+- `get_children()`: AST traversal support
+
+### 4. Analysis Modules
+
+#### Call Analyzer
+Sophisticated call detection and classification system.
+
+**Capabilities:**
+- External vs internal call detection
+- Low-level call identification (`.call`, `.delegatecall`)
+- Asset transfer detection (ETH, tokens, NFTs)
+- Library and interface call recognition
+- Contextual analysis for accuracy
+
+**Call Types:**
+- `EXTERNAL` - Cross-contract calls
+- `INTERNAL` - Same-contract calls
+- `LIBRARY` - Library function calls
+- `LOW_LEVEL` - Raw `.call()` operations
+- `DELEGATE` - Delegate calls
+- `STATIC` - Static calls
+- `SOLIDITY` - Built-in functions
+
+#### Data Flow Analyzer
+Variable dependency and flow tracking.
+
+**Features:**
+- Variable reference tracking (reads/writes)
+- Data flow path discovery
+- Influence analysis (what affects what)
+- Cross-function flow analysis
+- Flow graph construction
+
+**API:**
+- `trace_variable_flow()` - Find flow paths
+- `find_variable_influences()` - What influences a variable  
+- `find_variable_effects()` - What a variable affects
+- `get_data_flow_backward/forward()` - Directional analysis
+
+#### Import Analyzer
+Import dependency analysis and symbol tracking.
+
+**Capabilities:**
+- Import pattern matching
+- Dependency graph construction
+- Symbol usage tracking
+- External library detection
+- Import statistics
+
+### 5. Source Management
+
+Robust file handling with caching and incremental parsing.
+
+**Features:**
+- Multiple source format support (files, directories, patterns)
+- Intelligent caching with modification time checking
+- Dependency resolution for imports
+- Error handling and recovery
+- Statistics and metadata tracking
+
+**Components:**
+- `SourceManager` - Main file management
+- `SourceFile` - Individual file representation
+- `SolidityParser` - Tree-sitter integration
+- Dependency graph tracking
+
+### 6. Pattern Matching
+
+Flexible pattern matching with multiple strategies.
+
+**Supported Patterns:**
+- **Wildcards**: `*` (any chars), `?` (single char), `[abc]` (character sets)
+- **Regex**: Full regular expression support
+- **Exact**: String equality matching
+- **List**: Multiple pattern combinations
+
+**Use Cases:**
+- Name filtering (`*Token*`, `get*`)
+- Type matching (`uint*`, `mapping*`)
+- Source code pattern matching
+- Import path filtering
+
+## Data Flow
+
+### 1. Source Loading
+```
+Files → SourceManager → SolidityParser → tree-sitter → Parse Tree
+```
+
+### 2. AST Construction
+```
+Parse Tree → ASTBuilder → AST Nodes → Validation → Metadata Enrichment
+```
+
+### 3. Analysis Pipeline
+```
+AST Nodes → CallAnalyzer → DataFlowAnalyzer → ImportAnalyzer → Enhanced AST
+```
+
+### 4. Query Processing
+```
+Query → PatternMatcher → Collection Filter → Result Set → Serialization
 ```
 
 ## Design Principles
 
-### 1. **Separation of Concerns**
-- **Parsing**: Isolated in core.parser with tree-sitter integration
-- **AST Building**: Clean conversion from tree-sitter to structured nodes
-- **Querying**: Separated traditional and fluent interfaces
-- **Serialization**: Dedicated utilities for JSON export
+### 1. Type Safety
+- Pydantic models for all data structures
+- Enum-based type constants
+- Generic type annotations throughout
+- Runtime type validation
 
-### 2. **Performance**
-- **Lazy Evaluation**: Collections don't execute until needed
-- **Caching**: Parsed ASTs are cached to avoid re-parsing
-- **Efficient Filtering**: O(1) lookups where possible
-- **Memory Management**: Streaming processing for large codebases
+### 2. Performance
+- Lazy evaluation for expensive operations
+- Efficient caching strategies
+- Incremental parsing support
+- Optimized collection operations
 
-### 3. **Extensibility**
-- **Plugin Architecture**: Easy to add new query methods
-- **Custom Predicates**: Support for arbitrary filtering logic
-- **AST Node Extension**: New node types can be added
-- **Collection Extension**: New collection types can be created
+### 3. Extensibility
+- Plugin architecture for analyzers
+- Abstract base classes for extensibility
+- Configuration-driven behavior
+- Modular component design
 
-### 4. **Type Safety**
-- **Pydantic Models**: Runtime type validation
-- **TypeScript-style**: Optional static typing with mypy
-- **Enum Safety**: Structured enums for visibility, mutability, etc.
-- **Generic Collections**: Type-safe collection operations
+### 4. Usability
+- Dual API design (functional + fluent)
+- Comprehensive documentation
+- Rich error messages
+- Interactive development support
 
-### 5. **LLM Integration**
-- **JSON Serialization**: Complete AST serialization
-- **Structured Output**: Consistent, predictable format
-- **Source Mapping**: Precise location information
-- **Error Handling**: Graceful degradation for LLM contexts
+## Error Handling
 
-## Data Flow
+### Parse Errors
+- Graceful handling of syntax errors
+- Partial parsing recovery
+- Detailed error reporting with location info
+- Batch processing error accumulation
 
-### 1. Loading Phase
-```
-Source Files → SourceManager → SolidityParser → Tree-sitter AST
-```
+### Query Errors
+- Invalid pattern detection
+- Type mismatch handling
+- Empty result set management
+- Timeout protection for complex queries
 
-### 2. Building Phase
-```
-Tree-sitter AST → ASTBuilder → Structured AST Nodes → QueryEngine
-```
+### File System Errors
+- Missing file recovery
+- Permission error handling
+- Path resolution failures
+- Encoding issue management
 
-### 3. Query Phase
-```
-Query Request → Pattern Matching → AST Traversal → Collection → Results
-```
+## Memory Management
 
-### 4. Output Phase
-```
-Results → Serialization → JSON → LLM Integration
-```
+### Caching Strategy
+- LRU cache for parsed files
+- Configurable cache size limits
+- Memory pressure detection
+- Explicit cache clearing APIs
 
-## Extension Points
+### Resource Cleanup
+- Automatic resource disposal
+- Context manager support
+- Lazy loading of heavy objects
+- Efficient collection iterations
 
-### 1. **Custom AST Nodes**
-Add new node types by:
-- Extending `ASTNode` base class
-- Adding to `ast_builder.py` parsing logic
-- Updating serialization in `utils/serialization.py`
+## Threading and Concurrency
 
-### 2. **Custom Query Methods**
-Add new query capabilities by:
-- Adding methods to `SolidityQueryEngine`
-- Creating specialized collection filters
-- Implementing custom predicates
+### Thread Safety
+- Immutable AST node design
+- Thread-safe collection operations
+- Concurrent parsing support
+- Lock-free read operations
 
-### 3. **Custom Collections**
-Create domain-specific collections by:
-- Extending `BaseCollection`
-- Implementing specialized filtering logic
-- Adding navigation methods
+### Performance Optimization
+- Parallel file parsing
+- Concurrent analysis pipeline
+- Asynchronous I/O support
+- Background cache warming
 
-### 4. **Analysis Modules**
-Add advanced analysis by:
-- Creating modules in `sol_query/analysis/`
-- Integrating with query engine
-- Providing domain-specific APIs
+## Future Extensibility
 
-## Error Handling Strategy
+### Plugin Architecture
+- Custom analyzer registration
+- Extended node type support
+- Additional language support
+- Custom serialization formats
 
-### 1. **Graceful Degradation**
-- Continue parsing when encountering malformed code
-- Return partial results instead of failing completely
-- Log warnings for issues that don't prevent analysis
+### Analysis Extensions
+- Control flow analysis
+- Security vulnerability detection
+- Gas optimization analysis
+- Code quality metrics
 
-### 2. **Structured Errors**
-- Custom exception types for different error categories
-- Detailed error messages with source locations
-- Recovery suggestions where possible
+### Integration Points
+- IDE plugin support
+- CI/CD pipeline integration
+- Custom tool development
+- Research platform support
 
-### 3. **Validation**
-- Pydantic model validation for type safety
-- Pattern validation for query parameters
-- File system validation for source paths
+## Dependencies
 
-## Performance Characteristics
+### Core Dependencies
+- `tree-sitter` - Parsing engine
+- `tree-sitter-solidity` - Solidity grammar
+- `pydantic` - Data validation and serialization
+- `pathlib` - Path handling
 
-### 1. **Time Complexity**
-- **Parsing**: O(n) where n is source code size
-- **Query Execution**: O(m) where m is result set size
-- **Pattern Matching**: O(1) for exact, O(n) for wildcards
-- **Collection Operations**: O(k) where k is collection size
+### Optional Dependencies
+- Analysis libraries for extended features
+- Visualization tools for graph rendering
+- Export formats for different integrations
 
-### 2. **Memory Usage**
-- **AST Storage**: ~10-20MB per 1000 contracts
-- **Query Results**: Minimal overhead due to lazy evaluation
-- **Caching**: Configurable memory limits for large codebases
-
-### 3. **Scalability**
-- **Horizontal**: Can process multiple files in parallel
-- **Vertical**: Handles codebases up to 10,000+ contracts
-- **Streaming**: Supports processing larger-than-memory codebases
-
-This architecture provides a solid foundation for comprehensive Solidity code analysis while maintaining performance, extensibility, and ease of use.
+This architecture provides a solid foundation for comprehensive Solidity code analysis while maintaining flexibility for future enhancements and integrations.

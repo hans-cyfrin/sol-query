@@ -108,11 +108,11 @@ class ASTNode(BaseModel, ABC):
     def get_source_code(self) -> str:
         """Get the source code for this node."""
         return self.source_location.source_text
-    
+
     def get_children(self) -> List["ASTNode"]:
         """Get child nodes. Override in subclasses."""
         return []
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return self.model_dump(exclude={"raw_node"})

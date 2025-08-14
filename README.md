@@ -2,204 +2,231 @@
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Coverage](https://img.shields.io/badge/coverage-44%25-yellow.svg)
+![Coverage](https://img.shields.io/badge/coverage-68%25-green.svg)
+![Tests](https://img.shields.io/badge/tests-191%20passed-brightgreen.svg)
 
-A comprehensive Python-based query engine for Solidity smart contracts that provides both traditional and fluent query interfaces. Designed specifically for LLM integration with full JSON serialization support.
+A comprehensive Python-based query engine for Solidity smart contracts that provides both traditional and fluent query interfaces. Designed for security analysis, code migration, and research with advanced call graph and data flow analysis.
 
-## Documentation
-
-- [Getting Started Guide](docs/getting-started.md)
-- [API Reference](docs/api-reference.md)
-- [Query Examples](docs/query-examples.md)
-- [Architecture Overview](docs/architecture.md)
-- [Development Guide](docs/development.md)
-
-## Features
-
-### Unified Query Interface
-- **Traditional Style**: `engine.find_functions(visibility="public")`
-- **Fluent Style**: `engine.functions.public().view()`
-- **Seamless Integration**: Mix and match both styles in the same query
-
-### Comprehensive Analysis
-- **Contract Discovery**: Find contracts by name, inheritance, type (interface/library)
-- **Function Analysis**: Query by visibility, modifiers, state mutability, parameters
-- **Variable Inspection**: Search state variables, locals, constants, and immutables
-- **Event & Error Tracking**: Locate events and custom errors with parameter analysis
-- **Modifier Detection**: Find and analyze function modifiers
-- **External Call Detection**: Identify functions making external contract calls
-- **Asset Transfer Analysis**: Find ETH sends, token transfers, and asset movements
-- **Deep Call Tree Analysis**: Trace external calls and transfers through function chains
-
-### Advanced Pattern Matching
-- **Wildcard Support**: `"transfer*"` matches `transfer`, `transferFrom`, `transferOwnership`
-- **Regex Patterns**: Full regular expression support for complex searches
-- **Type Matching**: Smart Solidity type matching including arrays and mappings
-- **Multiple Patterns**: OR/AND logic for complex filtering conditions
-
-### LLM-Ready JSON Serialization
-- **Configurable Detail Levels**: Summary, Detailed, Full
-- **Pagination Support**: Handle large result sets efficiently
-- **Complete Metadata**: Source locations, signatures, relationships
-- **Tool-Call Compatible**: Perfect for LLM framework integration
-
-### Robust Parsing
-- **Tree-sitter Based**: Handles malformed/incomplete code gracefully
-- **Source Management**: Multi-file projects with dependency tracking
-- **Incremental Parsing**: Efficient updates for large codebases
-- **Error Recovery**: Continues analysis despite parse errors
-
-## Installation
+## 🚀 Quick Start
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd sol-query
-
-# Install with uv (recommended)
-uv sync
-
-# Or with pip
-pip install -e .
+pip install sol-query
 ```
-
-## Quick Start
 
 ```python
 from sol_query import SolidityQueryEngine
 
-# Initialize engine
-engine = SolidityQueryEngine()
+# Load and analyze contracts
+engine = SolidityQueryEngine("path/to/contracts")
 
-# Load Solidity files
-engine.load_sources("path/to/contracts")  # Directory
-engine.load_sources("contract.sol")       # Single file
-engine.load_sources(["file1.sol", "file2.sol"])  # Multiple files
+# Traditional API - simple and direct
+external_functions = engine.find_functions(visibility="external")
+token_contracts = engine.find_contracts(name_patterns="*Token*")
 
-# Traditional queries
-contracts = engine.find_contracts(name_patterns="Token*")
-public_functions = engine.find_functions(visibility="public")
-events = engine.find_events(name_patterns="Transfer")
+# Fluent API - chainable and expressive
+risky_functions = (engine.contracts
+                   .with_name("*")
+                   .functions
+                   .external()
+                   .with_external_calls()
+                   .payable())
 
-# Fluent queries
-external_functions = engine.functions.external()
-token_contract = engine.contracts.with_name("Token").first()
-view_functions = engine.functions.view().public()
-
-# Chain multiple filters
-payable_external = engine.functions.external().payable()
-owner_functions = engine.functions.with_modifiers("onlyOwner")
-
-# External call and asset transfer analysis
-functions_with_external_calls = engine.functions.with_external_calls()
-functions_with_asset_transfers = engine.functions.with_asset_transfers()
-deep_external_calls = engine.functions.with_external_calls_deep()
-
-# Navigation
-token_functions = engine.contracts.with_name("Token").get_functions()
-mapping_vars = engine.variables.with_type("mapping*")
+# Advanced analysis
+call_graph = engine.analyze_call_graph()
+flow_paths = engine.trace_variable_flow("balance", "transfer", "MyToken")
+import_deps = engine.analyze_imports("*OpenZeppelin*")
 ```
 
-## Example Usage
+## 📚 Documentation
 
-Run the example script to see the engine in action:
+- **[📖 Complete API Reference](docs/api-reference.md)** - Comprehensive method documentation with all parameters and examples
+- **[🏗️ Architecture Overview](docs/architecture.md)** - System design and component details  
+- **[📋 Documentation Hub](docs/README.md)** - Quick navigation and use cases
 
-```bash
-uv run python example.py
-```
+## ✨ Key Features
 
-This demonstrates:
-- Loading and analyzing Solidity contracts
-- Both traditional and fluent query styles
-- Pattern matching capabilities
-- JSON serialization for LLM integration
-- Navigation between code elements
+### 🔍 **Dual Query Interface**
+- **Traditional Style**: `engine.find_functions(visibility="public", state_mutability="view")`
+- **Fluent Style**: `engine.functions.public().view().with_name("get*")`
+- **Method Chaining**: `contracts.interfaces().functions.external().payable()`
+- **Set Operations**: `union()`, `intersect()`, `subtract()` for complex compositions
 
-## Testing
+### 🛡️ **Advanced Security Analysis** 
+- **External Call Detection**: Identify functions making cross-contract calls
+- **Asset Transfer Analysis**: Find ETH sends, token transfers, NFT operations
+- **Call Graph Analysis**: Trace call chains and dependency relationships
+- **Deep Analysis**: Transitive analysis through function call chains
+- **Low-level Call Detection**: Identify `.call()`, `.delegatecall()`, `.staticcall()`
 
-```bash
-# Run all tests
-uv run pytest
+### 🌊 **Comprehensive Data Flow Analysis**
+- **Variable Tracking**: Trace variable reads, writes, and modifications
+- **Influence Analysis**: Find what affects a variable's value
+- **Effect Analysis**: Find what a variable influences
+- **Flow Path Discovery**: Trace data flow between statements
+- **Cross-function Analysis**: Follow data flow across function boundaries
 
-# Run specific test file
-uv run pytest tests/test_basic_functionality.py
+### 📦 **Import & Dependency Analysis**
+- **Import Pattern Matching**: Find usage of specific libraries or interfaces
+- **Dependency Graphs**: Visualize contract dependencies
+- **Symbol Usage**: Track where imported symbols are used
+- **External Library Detection**: Identify usage of common libraries (OpenZeppelin, etc.)
 
-# Run with coverage
-uv run pytest --cov=sol_query --cov-report=html
-```
+### 🎯 **Precise Filtering & Pattern Matching**
+- **Contract Types**: Filter by interfaces, libraries, abstract contracts
+- **Function Properties**: Visibility, state mutability, modifiers, special functions
+- **Variable Types**: State variables, constants, immutables with type matching
+- **Statement Types**: Loops, conditionals, assignments, returns, requires
+- **Expression Types**: Calls, literals, identifiers with detailed categorization
+- **Wildcard Patterns**: `*Token*`, `get*`, `*[sS]afe*` with full regex support
 
-## Why Sol-Query Instead of Tree-Sitter?
+### 📊 **Rich Metadata & Analysis**
+- **Source Location Tracking**: Precise file, line, column information
+- **Type-safe AST**: Pydantic-based models with validation
+- **Call Classification**: External, internal, library, low-level call types
+- **Contextual Analysis**: Smart detection based on contract context
+- **JSON Serialization**: LLM-ready export with configurable detail levels
 
-While [tree-sitter-solidity](https://github.com/JoranHonig/tree-sitter-solidity) provides excellent parsing, it delivers raw syntax trees that require significant processing for meaningful analysis. Sol-Query bridges this gap:
+## 🔧 Use Cases
 
-**Tree-sitter gives you:**
-- Raw syntax nodes requiring manual traversal
-- Generic parsing without Solidity semantics
-- Complex recursive tree walking for simple queries
-
-**Sol-Query provides:**
-- High-level query abstractions: `engine.functions.external().payable()`
-- Solidity-specific intelligence: contract inheritance, modifier patterns, type systems
-- LLM-ready JSON serialization with configurable detail levels
-- Error-resilient parsing that handles malformed/incomplete code gracefully
-
-## Core Architecture
-
-### Components
-- **Parser**: Tree-sitter based Solidity parsing with robust error handling
-- **AST Builder**: Converts tree-sitter nodes to typed Python objects
-- **Source Manager**: Multi-file handling with dependency tracking
-- **Query Engine**: Unified interface supporting both query styles
-- **Collections**: Fluent query collections with method chaining
-- **Pattern Matcher**: Advanced pattern matching with regex and wildcards
-- **Serializer**: LLM-ready JSON output with configurable detail levels
-
-### Design Principles
-- **Robustness**: Handles incomplete/malformed code gracefully
-- **Performance**: Lazy evaluation, caching, efficient indexing
-- **Extensibility**: Plugin architecture for custom analyzers
-- **LLM Integration**: Full JSON serialization, tool-call compatible
-
-## Usage Examples
-
-### Traditional Query Style
+### Security Auditing
 ```python
-# Find all public functions with modifiers
-public_modified = engine.find_functions(
-    visibility="public",
-    modifiers=["onlyOwner"]
-)
+# Find potentially dangerous patterns
+dangerous_patterns = (engine.functions
+                      .external()
+                      .payable()
+                      .with_external_calls()
+                      .with_asset_transfers())
 
-# Find contracts inheriting from specific interfaces
-erc20_contracts = engine.find_contracts(
-    inheritance="IERC20",
-    kind="contract"
-)
+# Analyze low-level calls
+low_level_calls = engine.find_calls(call_types=["low_level", "delegate"])
+
+# Check for reentrancy risks
+external_call_funcs = engine.functions.with_external_calls()
+for func in external_call_funcs:
+    state_changes = engine.find_statements(
+        function_name=func.name,
+        statement_types=["assignment"]
+    )
 ```
 
-### Fluent Query Style
+### Code Migration & Refactoring
 ```python
-# Chain multiple filters
-complex_functions = (engine.functions
-                          .external()
-                          .payable()
-                          .with_modifiers("onlyOwner"))
+# Find deprecated patterns
+old_transfer_calls = engine.expressions.with_source_pattern("*.transfer(*)")
+safe_math_usage = engine.find_import_usage("*SafeMath*")
 
-# Navigate from contracts to elements
-token_events = (engine.contracts
-                     .with_name("Token")
-                     .get_events())
+# Analyze inheritance structures
+erc20_contracts = engine.contracts.inheriting_from(["ERC20", "IERC20"])
+proxy_contracts = engine.contracts.with_name("*Proxy*")
 ```
 
-### JSON Serialization
+### Research & Analytics
 ```python
-from sol_query.utils.serialization import LLMSerializer, SerializationLevel
+# Statistical analysis
+stats = engine.get_statistics()
+all_functions = engine.functions.all()
 
-serializer = LLMSerializer(SerializationLevel.DETAILED)
-result = serializer.serialize_query_result(contracts)
-json_output = serializer.to_json(result)
+# Pattern analysis
+view_functions_ratio = len(engine.functions.view()) / len(all_functions)
+external_call_prevalence = len(engine.functions.with_external_calls()) / len(all_functions)
+
+# Complex analysis with data flow
+for contract in engine.contracts:
+    for func in contract.get_functions():
+        if func.is_payable():
+            value_flow = engine.trace_variable_flow("msg.value", func.name)
+            # Analyze how ETH value is handled...
 ```
 
-## License
+## 🎯 Advanced Examples
 
-MIT License - Built for the Solidity development community.
+### Complex Query Composition
+```python
+# Find interface functions that are implemented across multiple contracts
+interface_funcs = (engine.contracts
+                   .interfaces()
+                   .functions
+                   .external()
+                   .get_signatures())
+
+implementations = []
+for sig in interface_funcs:
+    impls = (engine.contracts
+             .not_interfaces()
+             .functions
+             .with_signature(sig))
+    if len(impls) > 1:
+        implementations.append((sig, impls))
+```
+
+### Data Flow Analysis
+```python
+# Trace how user funds flow through a contract
+user_deposits = engine.functions.with_name("deposit*").payable()
+
+for deposit_func in user_deposits:
+    # Find where msg.value goes
+    value_flow = engine.trace_variable_flow("msg.value", deposit_func.name)
+    
+    # Find what affects user balances
+    balance_effects = engine.find_variable_effects("balances", deposit_func.name)
+    
+    print(f"Deposit function: {deposit_func.name}")
+    print(f"Value flow: {len(value_flow)} paths")
+    print(f"Balance effects: {len(balance_effects)} statements")
+```
+
+### Custom Analysis with Set Operations
+```python
+# Find functions that have external calls but no access control
+external_call_funcs = engine.functions.with_external_calls()
+protected_funcs = engine.functions.modifiers_applied(["onlyOwner", "onlyAdmin"])
+
+unprotected_external = external_call_funcs.subtract(protected_funcs)
+
+print(f"Found {len(unprotected_external)} potentially unsafe functions:")
+for func in unprotected_external:
+    print(f"  {func.parent_contract.name}.{func.name}")
+```
+
+## 🔬 Technical Architecture
+
+Sol-Query is built on a robust, extensible architecture:
+
+- **Tree-sitter Parser**: Robust parsing that handles incomplete/malformed code
+- **Type-safe AST**: Pydantic models ensure data integrity and validation
+- **Analysis Pipeline**: Modular analyzers for calls, data flow, and imports
+- **Collection Framework**: Chainable, type-safe collections with set operations
+- **Pattern Engine**: Flexible matching with wildcards, regex, and exact patterns
+- **Memory Efficient**: Lazy evaluation and caching for large codebases
+
+## 🚀 Performance & Scale
+
+- **Fast Parsing**: Tree-sitter provides efficient, incremental parsing
+- **Smart Caching**: Intelligent caching with modification time checking
+- **Lazy Evaluation**: Expensive operations only run when needed
+- **Memory Efficient**: Optimized for large codebases with thousands of contracts
+- **Parallel Processing**: Concurrent parsing and analysis where possible
+
+## 🤝 Contributing
+
+Sol-Query is actively developed and welcomes contributions:
+
+- **Issues**: Report bugs or request features
+- **Pull Requests**: Code improvements and new analyzers
+- **Documentation**: Help improve examples and guides
+- **Testing**: Add test cases for edge cases and new features
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## 🔗 Links
+
+- **[Complete API Documentation](docs/api-reference.md)**
+- **[Architecture Guide](docs/architecture.md)**
+- **[Documentation Hub](docs/README.md)**
+
+---
+
+**Perfect for**: Security auditors, researchers, DeFi analysts, smart contract developers, and anyone needing to understand Solidity codebases at scale.

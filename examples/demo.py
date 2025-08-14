@@ -316,150 +316,130 @@ def main():
     print(f"   Functions with assembly blocks: {len(assembly_functions)}")
 
     # Demonstrate new API features
-    print(f"\n🆕 New API Features for Enhanced Security Analysis:")
-    demonstrate_new_api_features(engine)
-
-    print(f"\n✨ Enhanced query engine demonstration complete!")
-    print(f"💡 This engine supports both traditional find_*() methods and fluent .*() chaining")
-    print(f"🔧 Perfect for LLM integration with full JSON serialization support")
-    print(f"🔄 Now includes comprehensive statement and expression analysis capabilities")
-    print(f"🎯 Enhanced with loop, conditional, assignment, and expression querying")
-    print(f"🆕 Now features advanced filtering APIs for source patterns, operators, literals, and time operations")
-
-
-def demonstrate_new_api_features(engine):
-    """Demonstrate the new API features for enhanced security analysis."""
-    
     print(f"\n📝 Source Code Pattern Filtering:")
-    
+
     # Source pattern filtering - fluent style
     require_functions = engine.functions.containing_source_pattern(r"require\(")
     print(f"   Functions with require statements: {len(require_functions)}")
-    
+
     balance_functions = engine.functions.with_source_containing("balance")
     print(f"   Functions containing 'balance': {len(balance_functions)}")
-    
+
     # Traditional style
     timestamp_functions = engine.find_functions_with_source_pattern(r"timestamp")
     print(f"   Functions with timestamp pattern: {len(timestamp_functions)}")
-    
+
     print(f"\n🔢 Operator and Expression Filtering:")
-    
+
     # Operator filtering
     arithmetic_expressions = engine.expressions.with_arithmetic_operators()
     print(f"   Expressions with arithmetic operators: {len(arithmetic_expressions)}")
-    
+
     comparison_expressions = engine.expressions.with_comparison_operators()
     print(f"   Expressions with comparison operators: {len(comparison_expressions)}")
-    
+
     # Specific operators
     equality_checks = engine.expressions.with_operator("==")
     print(f"   Equality comparison expressions: {len(equality_checks)}")
-    
+
     # Traditional API
     plus_expressions = engine.find_expressions_with_operator("+")
     print(f"   Addition expressions (traditional): {len(plus_expressions)}")
-    
+
     print(f"\n💎 Literal Value Filtering:")
-    
+
     # Literal filtering
     zero_literals = engine.expressions.literals().with_value(0)
     print(f"   Literals with value 0: {len(zero_literals)}")
-    
+
     numeric_range = engine.expressions.literals().with_numeric_value(min_val=1, max_val=100)
     print(f"   Numeric literals 1-100: {len(numeric_range)}")
-    
+
     # Traditional API
     one_literals = engine.find_expressions_with_value(1)
     print(f"   Literals with value 1 (traditional): {len(one_literals)}")
-    
+
     print(f"\n🔗 Member Access and Property Filtering:")
-    
+
     # Member access filtering
     balance_access = engine.expressions.accessing_member("balance")
     print(f"   Expressions accessing .balance: {len(balance_access)}")
-    
+
     length_access = engine.expressions.accessing_member("length")
     print(f"   Expressions accessing .length: {len(length_access)}")
-    
+
     # All member access expressions
     all_member_access = engine.expressions.member_access()
     print(f"   All member access expressions: {len(all_member_access)}")
-    
+
     # Traditional API
     balance_member_traditional = engine.find_expressions_accessing_member("balance")
     print(f"   Balance member access (traditional): {len(balance_member_traditional)}")
-    
+
     print(f"\n⏰ Time-Related Operation Filtering:")
-    
+
     # Time operations
     time_functions = engine.functions.with_time_operations()
     print(f"   Functions with time operations: {len(time_functions)}")
-    
+
     timestamp_functions = engine.functions.with_timestamp_usage()
     print(f"   Functions using block.timestamp: {len(timestamp_functions)}")
-    
+
     time_arithmetic = engine.functions.with_time_arithmetic()
     print(f"   Functions with time arithmetic: {len(time_arithmetic)}")
-    
+
     # Time-related variables
     time_variables = engine.variables.time_related()
     print(f"   Time-related variables: {len(time_variables)}")
-    
+
     # Traditional APIs
     time_funcs_traditional = engine.find_functions_with_time_operations()
     print(f"   Time functions (traditional): {len(time_funcs_traditional)}")
-    
+
     time_vars_traditional = engine.find_variables_time_related()
     print(f"   Time variables (traditional): {len(time_vars_traditional)}")
-    
+
     print(f"\n📞 Enhanced Call and Binary Expression Filtering:")
-    
+
     # Enhanced call filtering
     transfer_calls = engine.expressions.calls().to_method("transfer")
     print(f"   Calls to 'transfer' method: {len(transfer_calls)}")
-    
+
     two_param_calls = engine.expressions.calls().with_parameters(count=2)
     print(f"   Function calls with exactly 2 parameters: {len(two_param_calls)}")
-    
+
     # Binary expression enhancements
     binary_ops = engine.expressions.binary_operations()
     print(f"   Binary expressions: {len(binary_ops)}")
-    
+
     uint_left_ops = binary_ops.with_left_operand_type("uint")
     print(f"   Binary ops with 'uint' in left operand: {len(uint_left_ops)}")
-    
+
     zero_right_ops = binary_ops.with_right_operand_value(0)
     print(f"   Binary ops with 0 as right operand: {len(zero_right_ops)}")
-    
+
     print(f"\n🔗 Composable Query Examples:")
-    
+
     # Show how APIs can be composed for security analysis
     print(f"   Demonstrating composable security analysis queries:")
-    
+
     # Complex balance analysis
     risky_balance_ops = (engine.expressions
                         .accessing_member("balance")
                         .with_comparison_operators())
     print(f"   • Balance comparison operations: {len(risky_balance_ops)}")
-    
+
     # Functions with arithmetic but no bounds checking
     arithmetic_functions = engine.functions.with_source_containing("+")
     safe_arithmetic = arithmetic_functions.containing_source_pattern(r"require\(")
     print(f"   • Functions with arithmetic: {len(arithmetic_functions)}")
     print(f"   • Arithmetic functions with require: {len(safe_arithmetic)}")
-    
+
     # Time-based functions with potential overflow risk
     time_with_arithmetic = (engine.functions
                            .with_time_operations()
                            .with_source_containing("+"))
     print(f"   • Time functions with arithmetic: {len(time_with_arithmetic)}")
-    
-    print(f"\n🎯 API Composition Benefits:")
-    print(f"   • Modular: Each filter does one thing well")
-    print(f"   • Composable: Chain multiple filters together") 
-    print(f"   • Flexible: Works for any analysis scenario")
-    print(f"   • LLM-Friendly: Building blocks for creative analysis")
 
 
 if __name__ == "__main__":

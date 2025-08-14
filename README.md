@@ -1,17 +1,26 @@
 # Sol-Query: Powerful Solidity Code Analysis Engine
 
-![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Coverage](https://img.shields.io/badge/coverage-68%25-green.svg)
-![Tests](https://img.shields.io/badge/tests-191%20passed-brightgreen.svg)
+![Python](https://img.shields.io/badge/python-3.11+-blue.svg) ![License](https://img.shields.io/badge/license-MIT-green.svg) ![Coverage](https://img.shields.io/badge/coverage-68%25-green.svg) ![Tests](https://img.shields.io/badge/tests-191%20passed-brightgreen.svg)
 
 A comprehensive Python-based query engine for Solidity smart contracts that provides both traditional and fluent query interfaces. Designed for security analysis, code migration, and research with advanced call graph and data flow analysis.
 
 ## 🚀 Quick Start
 
+### Installation
+
 ```bash
-pip install sol-query
+# Install from GitHub
+pip install git+https://github.com/hans-cyfrin/sol-query.git
+
+# For development
+git clone https://github.com/hans-cyfrin/sol-query.git && cd sol-query && pip install -e .
+
+# Add to your project dependencies:
+# pyproject.toml: "sol-query @ git+https://github.com/hans-cyfrin/sol-query.git"
+# requirements.txt: git+https://github.com/hans-cyfrin/sol-query.git
 ```
+
+### Usage
 
 ```python
 from sol_query import SolidityQueryEngine
@@ -40,7 +49,7 @@ import_deps = engine.analyze_imports("*OpenZeppelin*")
 ## 📚 Documentation
 
 - **[📖 Complete API Reference](docs/api-reference.md)** - Comprehensive method documentation with all parameters and examples
-- **[🏗️ Architecture Overview](docs/architecture.md)** - System design and component details  
+- **[🏗️ Architecture Overview](docs/architecture.md)** - System design and component details
 - **[📋 Documentation Hub](docs/README.md)** - Quick navigation and use cases
 
 ## ✨ Key Features
@@ -51,7 +60,7 @@ import_deps = engine.analyze_imports("*OpenZeppelin*")
 - **Method Chaining**: `contracts.interfaces().functions.external().payable()`
 - **Set Operations**: `union()`, `intersect()`, `subtract()` for complex compositions
 
-### 🛡️ **Advanced Security Analysis** 
+### 🛡️ **Advanced Security Analysis**
 - **External Call Detection**: Identify functions making cross-contract calls
 - **Asset Transfer Analysis**: Find ETH sends, token transfers, NFT operations
 - **Call Graph Analysis**: Trace call chains and dependency relationships
@@ -86,58 +95,6 @@ import_deps = engine.analyze_imports("*OpenZeppelin*")
 - **Contextual Analysis**: Smart detection based on contract context
 - **JSON Serialization**: LLM-ready export with configurable detail levels
 
-## 🔧 Use Cases
-
-### Security Auditing
-```python
-# Find potentially dangerous patterns
-dangerous_patterns = (engine.functions
-                      .external()
-                      .payable()
-                      .with_external_calls()
-                      .with_asset_transfers())
-
-# Analyze low-level calls
-low_level_calls = engine.find_calls(call_types=["low_level", "delegate"])
-
-# Check for reentrancy risks
-external_call_funcs = engine.functions.with_external_calls()
-for func in external_call_funcs:
-    state_changes = engine.find_statements(
-        function_name=func.name,
-        statement_types=["assignment"]
-    )
-```
-
-### Code Migration & Refactoring
-```python
-# Find deprecated patterns
-old_transfer_calls = engine.expressions.with_source_pattern("*.transfer(*)")
-safe_math_usage = engine.find_import_usage("*SafeMath*")
-
-# Analyze inheritance structures
-erc20_contracts = engine.contracts.inheriting_from(["ERC20", "IERC20"])
-proxy_contracts = engine.contracts.with_name("*Proxy*")
-```
-
-### Research & Analytics
-```python
-# Statistical analysis
-stats = engine.get_statistics()
-all_functions = engine.functions.all()
-
-# Pattern analysis
-view_functions_ratio = len(engine.functions.view()) / len(all_functions)
-external_call_prevalence = len(engine.functions.with_external_calls()) / len(all_functions)
-
-# Complex analysis with data flow
-for contract in engine.contracts:
-    for func in contract.get_functions():
-        if func.is_payable():
-            value_flow = engine.trace_variable_flow("msg.value", func.name)
-            # Analyze how ETH value is handled...
-```
-
 ## 🎯 Advanced Examples
 
 ### Complex Query Composition
@@ -167,10 +124,10 @@ user_deposits = engine.functions.with_name("deposit*").payable()
 for deposit_func in user_deposits:
     # Find where msg.value goes
     value_flow = engine.trace_variable_flow("msg.value", deposit_func.name)
-    
+
     # Find what affects user balances
     balance_effects = engine.find_variable_effects("balances", deposit_func.name)
-    
+
     print(f"Deposit function: {deposit_func.name}")
     print(f"Value flow: {len(value_flow)} paths")
     print(f"Balance effects: {len(balance_effects)} statements")
@@ -200,23 +157,6 @@ Sol-Query is built on a robust, extensible architecture:
 - **Pattern Engine**: Flexible matching with wildcards, regex, and exact patterns
 - **Memory Efficient**: Lazy evaluation and caching for large codebases
 
-## 🚀 Performance & Scale
-
-- **Fast Parsing**: Tree-sitter provides efficient, incremental parsing
-- **Smart Caching**: Intelligent caching with modification time checking
-- **Lazy Evaluation**: Expensive operations only run when needed
-- **Memory Efficient**: Optimized for large codebases with thousands of contracts
-- **Parallel Processing**: Concurrent parsing and analysis where possible
-
-## 🤝 Contributing
-
-Sol-Query is actively developed and welcomes contributions:
-
-- **Issues**: Report bugs or request features
-- **Pull Requests**: Code improvements and new analyzers
-- **Documentation**: Help improve examples and guides
-- **Testing**: Add test cases for edge cases and new features
-
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) for details.
@@ -226,7 +166,3 @@ MIT License - see [LICENSE](LICENSE) for details.
 - **[Complete API Documentation](docs/api-reference.md)**
 - **[Architecture Guide](docs/architecture.md)**
 - **[Documentation Hub](docs/README.md)**
-
----
-
-**Perfect for**: Security auditors, researchers, DeFi analysts, smart contract developers, and anyone needing to understand Solidity codebases at scale.

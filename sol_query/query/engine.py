@@ -15,6 +15,7 @@ from sol_query.query.collections import (
     ModifierCollection, EventCollection, StatementCollection, ExpressionCollection
 )
 from sol_query.utils.pattern_matching import PatternMatcher
+from sol_query.analysis.call_types import CallType
 
 
 class SolidityQueryEngine:
@@ -2210,3 +2211,152 @@ class SolidityQueryEngine:
                 continue
 
         return stats
+
+    # Instruction-level call analysis methods (Glider-style)
+    def find_call_instructions(self, call_type: Optional[str] = None, **filters) -> List[Expression]:
+        """
+        Find call instructions, optionally filtered by call type.
+        Similar to Glider's Instructions().calls()
+        """
+
+
+        # Get all call expressions
+        calls = self.find_calls(**filters)
+
+        if call_type:
+            # Filter by specific call type
+            filtered_calls = []
+            for call in calls:
+                if hasattr(call, 'get_call_type'):
+                    if call.get_call_type() and call.get_call_type().value == call_type:
+                        filtered_calls.append(call)
+            return filtered_calls
+
+        return calls
+
+    def find_external_call_instructions(self, **filters) -> List[Expression]:
+        """Find only external call instructions."""
+        all_calls = self.find_calls(**filters)
+        external_calls = []
+
+        for call in all_calls:
+            if hasattr(call, 'get_call_type'):
+                call_type = call.get_call_type()
+                if call_type in {CallType.EXTERNAL, CallType.LOW_LEVEL, CallType.DELEGATE, CallType.STATIC}:
+                    external_calls.append(call)
+
+        return external_calls
+
+    def find_internal_call_instructions(self, visibility: Optional[str] = None, **filters) -> List[Expression]:
+        """Find internal call instructions, optionally filtered by visibility."""
+
+
+        all_calls = self.find_calls(**filters)
+        internal_calls = []
+
+        for call in all_calls:
+            if hasattr(call, 'get_call_type'):
+                call_type = call.get_call_type()
+
+                if visibility:
+                    # Filter by specific visibility
+                    if (visibility == 'private' and call_type == CallType.PRIVATE) or \
+                       (visibility == 'public' and call_type == CallType.PUBLIC) or \
+                       (visibility == 'internal' and call_type == CallType.INTERNAL):
+                        internal_calls.append(call)
+                else:
+                    # All internal calls
+                    if call_type in {CallType.INTERNAL, CallType.PRIVATE, CallType.PUBLIC}:
+                        internal_calls.append(call)
+
+        return internal_calls
+
+    def find_delegate_call_instructions(self, **filters) -> List[Expression]:
+        """Find delegate call instructions."""
+
+
+        all_calls = self.find_calls(**filters)
+        delegate_calls = []
+
+        for call in all_calls:
+            if hasattr(call, 'get_call_type'):
+                if call.get_call_type() == CallType.DELEGATE:
+                    delegate_calls.append(call)
+
+        return delegate_calls
+
+    def find_library_call_instructions(self, **filters) -> List[Expression]:
+        """Find library call instructions."""
+
+
+        all_calls = self.find_calls(**filters)
+        library_calls = []
+
+        for call in all_calls:
+            if hasattr(call, 'get_call_type'):
+                if call.get_call_type() == CallType.LIBRARY:
+                    library_calls.append(call)
+
+        return library_calls
+
+    def find_low_level_call_instructions(self, **filters) -> List[Expression]:
+        """Find low-level call instructions (.call, .send, .transfer)."""
+
+
+        all_calls = self.find_calls(**filters)
+        low_level_calls = []
+
+        for call in all_calls:
+            if hasattr(call, 'get_call_type'):
+                call_type = call.get_call_type()
+                if call_type in {CallType.LOW_LEVEL, CallType.DELEGATE, CallType.STATIC}:
+                    low_level_calls.append(call)
+
+        return low_level_calls
+
+    def find_static_call_instructions(self, **filters) -> List[Expression]:
+        """Find static call instructions."""
+
+
+        all_calls = self.find_calls(**filters)
+        static_calls = []
+
+        for call in all_calls:
+            if hasattr(call, 'get_call_type'):
+                if call.get_call_type() == CallType.STATIC:
+                    static_calls.append(call)
+
+        return static_calls
+
+    def find_calls_with_callee_function_name(self, name: str, sensitivity: bool = True, **filters) -> List[Expression]:
+        """Find calls to functions with specific name."""
+        calls = self.find_calls(**filters)
+        filtered_calls = []
+
+        for call in calls:
+            call_info = call.get_call_info() if hasattr(call, 'get_call_info') else None
+            if call_info:
+                func_name = call_info.get_name()
+                if func_name:
+                    if sensitivity:
+                        if func_name == name:
+                            filtered_calls.append(call)
+                    else:
+                        if func_name.lower() == name.lower():
+                            filtered_calls.append(call)
+
+        return filtered_calls
+
+    def find_calls_with_callee_function_signature(self, signature: str, **filters) -> List[Expression]:
+        """Find calls with specific function signature."""
+        calls = self.find_calls(**filters)
+        filtered_calls = []
+
+        for call in calls:
+            call_info = call.get_call_info() if hasattr(call, 'get_call_info') else None
+            if call_info:
+                call_sig = call_info.get_signature()
+                if call_sig and signature in call_sig:
+                    filtered_calls.append(call)
+
+        return filtered_calls

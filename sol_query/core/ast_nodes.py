@@ -12,8 +12,11 @@ from sol_query.models.source_location import SourceLocation
 
 if TYPE_CHECKING:
     from sol_query.core.parser import SolidityParser
-    from sol_query.analysis.data_flow import DataFlowPoint
-    from sol_query.analysis.variable_tracker import VariableReference
+    from sol_query.analysis.data_flow import DataFlowPoint, DataFlowAnalyzer
+    from sol_query.analysis.variable_tracker import VariableReference, VariableTracker
+    from sol_query.analysis.call_types import CallType
+    from sol_query.analysis.call_analyzer import CallAnalyzer
+    from sol_query.analysis.call_metadata import CallMetadata
 
 
 class Visibility(str, Enum):
@@ -597,12 +600,104 @@ class CallExpression(Expression):
         default_factory=list,
         description="Call arguments"
     )
+    call_type: Optional[str] = Field(
+        default=None,
+        description="Type of call (external, internal, library, etc.)"
+    )
 
     def get_children(self) -> List[ASTNode]:
         """Get child nodes."""
         children: List[ASTNode] = [self.function]
         children.extend(self.arguments)
         return children
+
+    def get_call_type(self) -> Optional['CallType']:
+        """Get the type of this call, analyzing if not already set."""
+        if self.call_type is not None:
+            # Convert string back to CallType if needed
+            from sol_query.analysis.call_types import CallType
+            if isinstance(self.call_type, str):
+                try:
+                    return CallType(self.call_type)
+                except ValueError:
+                    return None
+            return self.call_type
+
+        # Lazy analysis if call type not set
+        try:
+            from sol_query.analysis.call_analyzer import CallAnalyzer
+            analyzer = CallAnalyzer()
+            call_type = analyzer.analyze_call_type(self)
+            self.call_type = call_type.value if call_type else None
+            return call_type
+        except:
+            return None
+
+    def is_external_call(self) -> bool:
+        """Check if this is an external call."""
+        call_type = self.get_call_type()
+        if call_type is None:
+            return False
+
+        from sol_query.analysis.call_types import CallType
+        return call_type in {CallType.EXTERNAL, CallType.LOW_LEVEL, CallType.DELEGATE, CallType.STATIC}
+
+    def is_internal_call(self) -> bool:
+        """Check if this is an internal call."""
+        call_type = self.get_call_type()
+        if call_type is None:
+            return False
+
+        from sol_query.analysis.call_types import CallType
+        return call_type in {CallType.INTERNAL, CallType.PRIVATE, CallType.PUBLIC}
+
+    def is_library_call(self) -> bool:
+        """Check if this is a library call."""
+        call_type = self.get_call_type()
+        from sol_query.analysis.call_types import CallType
+        return call_type == CallType.LIBRARY
+
+    def is_low_level_call(self) -> bool:
+        """Check if this is a low-level call."""
+        call_type = self.get_call_type()
+        from sol_query.analysis.call_types import CallType
+        return call_type in {CallType.LOW_LEVEL, CallType.DELEGATE, CallType.STATIC}
+
+    def get_call_signature(self) -> Optional[str]:
+        """Get the signature of the function being called."""
+        try:
+            if hasattr(self.function, 'name'):
+                func_name = self.function.name
+                arg_count = len(self.arguments)
+                return f"{func_name}({','.join([''] * arg_count)})"
+            else:
+                # For complex expressions, use source code
+                source = self.get_source_code()
+                # Extract function name from source
+                import re
+                match = re.match(r'(\w+)\s*\(', source)
+                if match:
+                    return f"{match.group(1)}(...)"
+            return None
+        except:
+            return None
+
+    def get_call_info(self):
+        """Get structured metadata about this call."""
+        from sol_query.analysis.call_metadata import CallMetadata
+        return CallMetadata(self)
+
+    def get_call_args(self):
+        """Get structured information about call arguments."""
+        return self.get_call_info().get_args()
+
+    def get_call_value(self) -> Optional[str]:
+        """Get the ETH value being sent with this call."""
+        return self.get_call_info().get_call_value()
+
+    def get_call_gas(self) -> Optional[str]:
+        """Get the gas specification for this call."""
+        return self.get_call_info().get_call_gas()
 
 
 class BinaryExpression(Expression):

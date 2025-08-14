@@ -2,13 +2,14 @@
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union, Pattern, Callable, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Union, Pattern, Callable, TYPE_CHECKING, Set
 
 from sol_query.core.ast_nodes import (
     ASTNode, ContractDeclaration, FunctionDeclaration, VariableDeclaration,
     ModifierDeclaration, EventDeclaration, Statement, Expression,
     Visibility, StateMutability
 )
+from sol_query.analysis.call_types import CallType
 
 if TYPE_CHECKING:
     from sol_query.query.engine import SolidityQueryEngine
@@ -539,7 +540,6 @@ class FunctionCollection(BaseCollection):
     def with_data_flow_between(self, from_variable: str, to_variable: str) -> "FunctionCollection":
         """Functions where data flows from one variable to another."""
         from sol_query.analysis.variable_tracker import VariableTracker
-
         tracker = VariableTracker()
         filtered = []
 
@@ -924,6 +924,77 @@ class ExpressionCollection(BaseCollection):
         """Get only call expressions."""
         return self.with_type("call_expression")
 
+    def _filter_by_call_types(self, call_types: Union[CallType, Set[CallType]]) -> "ExpressionCollection":
+        """Helper method to filter calls by call type(s)."""
+        if isinstance(call_types, CallType):
+            call_types = {call_types}
+
+        filtered = []
+        for e in self.calls():
+            if hasattr(e, 'get_call_type'):
+                call_type = e.get_call_type()
+                if call_type in call_types:
+                    filtered.append(e)
+        return self._create_new_collection(filtered)
+
+    def _filter_calls_by_source_pattern(self, pattern: str) -> "ExpressionCollection":
+        """Helper method to filter calls by regex pattern in source code."""
+        filtered = []
+        for call in self.calls():
+            source = call.get_source_code()
+            if re.search(pattern, source):
+                filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def _extract_function_name_from_call(self, call) -> Optional[str]:
+        """Helper method to extract function name from a call expression."""
+        if hasattr(call, 'function') and hasattr(call.function, 'name'):
+            return call.function.name
+        else:
+            # Try to extract name from source code
+            source = call.get_source_code()
+            match = re.match(r'(\w+)\s*\(', source)
+            if match:
+                return match.group(1)
+        return None
+
+    # Call type filtering methods
+    def external_calls(self) -> "ExpressionCollection":
+        """Filter to only external call expressions."""
+        return self._filter_by_call_types({CallType.EXTERNAL, CallType.LOW_LEVEL, CallType.DELEGATE, CallType.STATIC})
+
+    def internal_calls(self) -> "ExpressionCollection":
+        """Filter to only internal call expressions."""
+        return self._filter_by_call_types({CallType.INTERNAL, CallType.PRIVATE, CallType.PUBLIC})
+
+    def library_calls(self) -> "ExpressionCollection":
+        """Filter to only library call expressions."""
+        return self._filter_by_call_types(CallType.LIBRARY)
+
+    def delegate_calls(self) -> "ExpressionCollection":
+        """Filter to only delegate call expressions."""
+        return self._filter_by_call_types(CallType.DELEGATE)
+
+    def low_level_calls(self) -> "ExpressionCollection":
+        """Filter to only low-level call expressions (.call, .send, .transfer)."""
+        return self._filter_by_call_types({CallType.LOW_LEVEL, CallType.DELEGATE, CallType.STATIC})
+
+    def static_calls(self) -> "ExpressionCollection":
+        """Filter to only static call expressions."""
+        return self._filter_by_call_types(CallType.STATIC)
+
+    def event_calls(self) -> "ExpressionCollection":
+        """Filter to only event emission expressions."""
+        return self._filter_by_call_types(CallType.EVENT)
+
+    def solidity_calls(self) -> "ExpressionCollection":
+        """Filter to only built-in Solidity function calls."""
+        return self._filter_by_call_types(CallType.SOLIDITY)
+
+    def with_call_type(self, call_type: CallType) -> "ExpressionCollection":
+        """Filter to calls of a specific type."""
+        return self._filter_by_call_types(call_type)
+
     def identifiers(self) -> "ExpressionCollection":
         """Get only identifier expressions."""
         return self.with_type("identifier")
@@ -1055,6 +1126,109 @@ class ExpressionCollection(BaseCollection):
                     continue
                 filtered.append(expr)
         return self._create_new_collection(filtered)
+
+    # Advanced call filtering methods (Glider-style)
+    def with_callee_function_name(self, name: str, sensitivity: bool = True) -> "ExpressionCollection":
+        """Filter calls to functions with specific name."""
+        filtered = []
+        for call in self.calls():
+            func_name = self._extract_function_name_from_call(call)
+            if func_name:
+                if sensitivity:
+                    if func_name == name:
+                        filtered.append(call)
+                else:
+                    if func_name.lower() == name.lower():
+                        filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def with_callee_function_signature(self, signature: str) -> "ExpressionCollection":
+        """Filter calls with specific function signature."""
+        filtered = []
+        for call in self.calls():
+            if hasattr(call, 'get_call_signature'):
+                call_sig = call.get_call_signature()
+                if call_sig and signature in call_sig:
+                    filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def with_callee_function_name_prefix(self, prefix: str) -> "ExpressionCollection":
+        """Filter calls to functions with names starting with prefix."""
+        filtered = []
+        for call in self.calls():
+            func_name = self._extract_function_name_from_call(call)
+            if func_name and func_name.startswith(prefix):
+                filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def with_callee_function_name_suffix(self, suffix: str) -> "ExpressionCollection":
+        """Filter calls to functions with names ending with suffix."""
+        filtered = []
+        for call in self.calls():
+            func_name = self._extract_function_name_from_call(call)
+            if func_name and func_name.endswith(suffix):
+                filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def without_callee_function_name(self, name: str) -> "ExpressionCollection":
+        """Filter out calls to functions with specific name."""
+        filtered = []
+        for call in self.calls():
+            func_name = self._extract_function_name_from_call(call)
+            if func_name != name:  # Include if name is different or None
+                filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def without_callee_function_names(self, names: List[str]) -> "ExpressionCollection":
+        """Filter out calls to functions with any of the specified names."""
+        filtered = []
+        for call in self.calls():
+            func_name = self._extract_function_name_from_call(call)
+            if func_name not in names:  # Include if name is not in list or None
+                filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def with_one_of_callee_function_names(self, names: List[str]) -> "ExpressionCollection":
+        """Filter calls to functions with any of the specified names."""
+        filtered = []
+        for call in self.calls():
+            func_name = self._extract_function_name_from_call(call)
+            if func_name and func_name in names:
+                filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def with_all_callee_function_names(self, names: List[str]) -> "ExpressionCollection":
+        """Filter to expressions containing calls to ALL specified function names."""
+        # This is more complex as it requires checking if ALL names are present
+        filtered = []
+        for expr in self._elements:
+            source = expr.get_source_code()
+            found_names = set()
+            for match in re.finditer(r'(\w+)\s*\(', source):
+                found_names.add(match.group(1))
+
+            if all(name in found_names for name in names):
+                filtered.append(expr)
+
+        return self._create_new_collection(filtered)
+
+    def with_call_value(self) -> "ExpressionCollection":
+        """Filter calls that send ETH value."""
+        return self._filter_calls_by_source_pattern(r'\{[^}]*value\s*:|\.call\{value:')
+
+    def without_call_value(self) -> "ExpressionCollection":
+        """Filter calls that do NOT send ETH value."""
+        filtered = []
+        for call in self.calls():
+            source = call.get_source_code()
+            # Look for value specification patterns
+            if not (re.search(r'\{[^}]*value\s*:', source) or re.search(r'\.call\{value:', source)):
+                filtered.append(call)
+        return self._create_new_collection(filtered)
+
+    def with_call_gas(self) -> "ExpressionCollection":
+        """Filter calls that specify gas."""
+        return self._filter_calls_by_source_pattern(r'\{[^}]*gas\s*:|\.call\{gas:')
 
     # Binary expression enhancements
     def with_left_operand_type(self, type_name: str) -> "ExpressionCollection":

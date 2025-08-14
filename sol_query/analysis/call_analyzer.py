@@ -6,6 +6,7 @@ from sol_query.core.ast_nodes import (
     ASTNode, FunctionDeclaration, CallExpression, Expression,
     Identifier, Literal, BinaryExpression
 )
+from sol_query.analysis.call_types import CallType, CallTypeDetector
 
 
 class CallAnalyzer:
@@ -13,6 +14,9 @@ class CallAnalyzer:
 
     def __init__(self):
         """Initialize the call analyzer."""
+        # Initialize call type detector
+        self.call_type_detector = CallTypeDetector()
+
         # Patterns for detecting external calls
         self.external_call_patterns = {
             # Direct external contract calls
@@ -106,6 +110,128 @@ class CallAnalyzer:
         asset_transfers = self._detect_asset_transfers_contextual(expressions, function, contract_context)
         function.has_asset_transfers = len(asset_transfers) > 0
         function.asset_transfer_types = list(asset_transfers)
+
+    def analyze_call_type(self, expression: Expression, context: Optional[Dict] = None) -> CallType:
+        """
+        Analyze a call expression to determine its type.
+        
+        Args:
+            expression: The call expression to analyze
+            context: Optional context for better classification
+            
+        Returns:
+            The detected CallType
+        """
+        if not isinstance(expression, CallExpression):
+            return CallType.UNKNOWN
+
+        # Get source code for the expression
+        source_code = expression.get_source_code()
+
+        # Build context if not provided
+        if context is None:
+            context = self._build_expression_context(expression)
+
+        return self.call_type_detector.detect_call_type(source_code, context)
+
+    def classify_all_calls(self, expressions: List[Expression], function_context: Optional[Dict] = None) -> Dict[Expression, CallType]:
+        """
+        Classify all call expressions in a list.
+        
+        Args:
+            expressions: List of expressions to classify
+            function_context: Context about the containing function
+            
+        Returns:
+            Dictionary mapping expressions to their call types
+        """
+        classifications = {}
+
+        for expr in expressions:
+            if isinstance(expr, CallExpression):
+                context = function_context or self._build_expression_context(expr)
+                call_type = self.analyze_call_type(expr, context)
+                classifications[expr] = call_type
+
+        return classifications
+
+    def _build_expression_context(self, expression: Expression) -> Dict:
+        """Build context information for call type detection."""
+        context = {}
+
+        # Try to determine if this is a library call, external call, etc.
+        source_code = expression.get_source_code()
+
+        # Check for interface patterns
+        if any(pattern in source_code for pattern in ['I' + name for name in ['ERC20', 'ERC721', 'Uniswap']]):
+            context['is_external_contract'] = True
+
+        # Check for library patterns
+        if re.search(r'^[A-Z]\w*\.\w+\s*\(', source_code):
+            context['is_library_call'] = True
+
+        return context
+
+    def detect_try_catch_calls(self, expressions: List[Expression]) -> List[Expression]:
+        """Detect calls wrapped in try/catch blocks."""
+        try_catch_calls = []
+
+        for expr in expressions:
+            source = expr.get_source_code()
+            # Look for try patterns
+            if re.search(r'\btry\s+', source):
+                try_catch_calls.append(expr)
+
+        return try_catch_calls
+
+    def detect_assembly_calls(self, expressions: List[Expression]) -> Dict[str, List[Expression]]:
+        """Detect different types of assembly calls."""
+        assembly_calls = {
+            'call': [],
+            'delegatecall': [],
+            'staticcall': [],
+            'other': []
+        }
+
+        for expr in expressions:
+            source = expr.get_source_code()
+
+            if re.search(r'\bassembly\s*\{', source):
+                if re.search(r'\bdelegatecall\s*\(', source):
+                    assembly_calls['delegatecall'].append(expr)
+                elif re.search(r'\bstaticcall\s*\(', source):
+                    assembly_calls['staticcall'].append(expr)
+                elif re.search(r'\bcall\s*\(', source):
+                    assembly_calls['call'].append(expr)
+                else:
+                    assembly_calls['other'].append(expr)
+
+        return assembly_calls
+
+    def analyze_enhanced_call_patterns(self, function: FunctionDeclaration) -> Dict[str, any]:
+        """Enhanced analysis including try/catch, assembly, etc."""
+        if not function.body:
+            return {}
+
+        expressions = self._extract_all_expressions(function)
+
+        analysis = {
+            'try_catch_calls': self.detect_try_catch_calls(expressions),
+            'assembly_calls': self.detect_assembly_calls(expressions),
+            'total_calls': len([e for e in expressions if isinstance(e, CallExpression)]),
+        }
+
+        # Add call type distribution
+        call_types = {}
+        for expr in expressions:
+            if isinstance(expr, CallExpression):
+                call_type = self.analyze_call_type(expr)
+                call_type_str = call_type.value if call_type else 'unknown'
+                call_types[call_type_str] = call_types.get(call_type_str, 0) + 1
+
+        analysis['call_type_distribution'] = call_types
+
+        return analysis
 
     def _extract_all_expressions(self, function: FunctionDeclaration) -> List[Expression]:
         """Extract all expressions from a function recursively."""

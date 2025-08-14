@@ -1186,14 +1186,18 @@ class SolidityQueryEngine:
         statements = self._get_all_statements(contract_name, function_name)
 
         for statement in statements:
-            # Include expression statements as expressions too (Fix #1)
-            if hasattr(statement, 'node_type') and statement.node_type.value == 'expression_statement':
-                if hasattr(statement, 'expression') and statement.expression:
-                    expressions.append(statement.expression)
-
             expressions.extend(self._extract_expressions_from_statement(statement))
 
-        return expressions
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_expressions = []
+        for expr in expressions:
+            expr_id = id(expr)
+            if expr_id not in seen:
+                seen.add(expr_id)
+                unique_expressions.append(expr)
+
+        return unique_expressions
 
     def _extract_statements_from_block(self, block) -> List[Statement]:
         """Extract all statements from a block recursively."""
@@ -2360,3 +2364,76 @@ class SolidityQueryEngine:
                     filtered_calls.append(call)
 
         return filtered_calls
+
+    def find_calls_with_called_function_name_prefix(self, prefix: str, **filters) -> List[Expression]:
+        """Find calls to functions with names starting with prefix."""
+        calls = self.find_calls(**filters)
+        filtered_calls = []
+
+        for call in calls:
+            call_info = call.get_call_info() if hasattr(call, 'get_call_info') else None
+            if call_info:
+                func_name = call_info.get_name()
+                if func_name and func_name.startswith(prefix):
+                    filtered_calls.append(call)
+
+        return filtered_calls
+
+    # ===== IMPORT ANALYSIS METHODS =====
+
+    def import_analyzer(self):
+        """Get an import analyzer instance for dependency analysis."""
+        from sol_query.analysis.import_analyzer import ImportAnalyzer
+        return ImportAnalyzer(self.source_manager)
+
+    def find_imports(self, pattern: Optional[str] = None, **filters) -> List:
+        """
+        Find import statements matching a pattern.
+        
+        Args:
+            pattern: Pattern to match import paths/symbols (supports wildcards)
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching import statements
+        """
+        analyzer = self.import_analyzer()
+
+        if pattern:
+            return analyzer.find_imports_matching(pattern)
+        else:
+            # Return all imports
+            all_imports = []
+            for source_file in self.source_manager.get_all_files():
+                all_imports.extend(source_file.imports)
+            return all_imports
+
+    def find_contracts_using_imports(self, import_patterns: Union[str, List[str]], **filters):
+        """
+        Find contracts that use specific imports.
+        
+        Args:
+            import_patterns: Import patterns to match (string or list)
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of contracts using the specified imports
+        """
+        patterns = [import_patterns] if isinstance(import_patterns, str) else import_patterns
+        analyzer = self.import_analyzer()
+        return analyzer.get_contracts_using_imports(patterns)
+
+    def find_functions_calling_imported(self, import_patterns: Union[str, List[str]], **filters):
+        """
+        Find functions that call symbols from specific imports.
+        
+        Args:
+            import_patterns: Import patterns to match (string or list)
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of functions calling imported symbols
+        """
+        patterns = [import_patterns] if isinstance(import_patterns, str) else import_patterns
+        analyzer = self.import_analyzer()
+        return analyzer.get_functions_calling_imported_symbols(patterns)

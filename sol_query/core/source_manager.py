@@ -10,7 +10,7 @@ import tree_sitter
 
 from sol_query.core.parser import SolidityParser, ParseError
 from sol_query.core.ast_builder import ASTBuilder
-from sol_query.core.ast_nodes import ASTNode, ContractDeclaration
+from sol_query.core.ast_nodes import ASTNode, ContractDeclaration, ImportStatement
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class SourceFile:
     tree: Optional[tree_sitter.Tree] = None
     ast: Optional[List[ASTNode]] = None
     contracts: List[ContractDeclaration] = field(default_factory=list)
-    imports: List[str] = field(default_factory=list)
+    imports: List[ImportStatement] = field(default_factory=list)
     parse_errors: List[ParseError] = field(default_factory=list)
 
     def is_parsed(self) -> bool:
@@ -331,8 +331,11 @@ class SourceManager:
                 if isinstance(node, ContractDeclaration)
             ]
 
-            # Extract imports (simplified - would need more sophisticated parsing)
-            source_file.imports = self._extract_imports(source_file.content)
+            # Extract imports
+            source_file.imports = [
+                node for node in ast_nodes
+                if isinstance(node, ImportStatement)
+            ]
 
             # Update dependency tracking
             self._update_dependencies(source_file)
@@ -398,7 +401,8 @@ class SourceManager:
         dependencies = set()
 
         # Resolve import paths to actual files
-        for import_path in source_file.imports:
+        for import_stmt in source_file.imports:
+            import_path = import_stmt.import_path if hasattr(import_stmt, 'import_path') else str(import_stmt)
             resolved_path = self._resolve_import(import_path, path)
             if resolved_path and resolved_path in self.files:
                 dependencies.add(resolved_path)

@@ -32,10 +32,10 @@ class TestNegationFilters:
         # Verify that not_external + external = all functions
         assert len(not_external) + len(external) == len(all_functions)
 
-        # Verify no overlap
-        external_names = {f.name for f in external}
-        not_external_names = {f.name for f in not_external}
-        assert len(external_names.intersection(not_external_names)) == 0
+        # Verify no overlap at function object level (not just names)
+        external_ids = {id(f) for f in external._elements}
+        not_external_ids = {id(f) for f in not_external._elements}
+        assert len(external_ids.intersection(not_external_ids)) == 0
 
     def test_function_constructor_negation(self, engine):
         """Test constructor negation filters."""
@@ -206,8 +206,8 @@ class TestNegationFilters:
         # Note: This is a conceptual test - double negation isn't directly implemented
         # but we can verify the logic by checking that not_external excludes external functions
         not_external = engine.functions.not_external()
-        external_names = {f.name for f in external_functions}
-        not_external_names = {f.name for f in not_external}
+        external_ids = {id(f) for f in external_functions._elements}
+        not_external_ids = {id(f) for f in not_external._elements}
 
-        # Verify no overlap between external and not_external
-        assert len(external_names.intersection(not_external_names)) == 0
+        # Verify no overlap between external and not_external at function object level
+        assert len(external_ids.intersection(not_external_ids)) == 0

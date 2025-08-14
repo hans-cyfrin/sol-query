@@ -19,6 +19,7 @@ class FlowType(str, Enum):
     INDIRECT = "indirect"      # Flow through expressions: c = a + b
     PARAMETER = "parameter"    # Flow through function parameters
     RETURN = "return"         # Flow through return values
+    DECLARATION = "declaration"  # Variable declaration: uint256 temp = value
 
 
 @dataclass
@@ -196,7 +197,12 @@ class DataFlowAnalyzer:
 
         # Analyze function body
         if function.body:
-            self._analyze_statement_block(function.body, graph)
+            # Check if body is a Block object with statements attribute
+            if hasattr(function.body, 'statements') and function.body.statements:
+                self._analyze_statement_block(function.body.statements, graph)
+            elif isinstance(function.body, list):
+                # If body is already a list of statements
+                self._analyze_statement_block(function.body, graph)
 
     def _analyze_statement_block(self, statements: List[Statement], graph: DataFlowGraph):
         """Analyze a block of statements."""
@@ -209,6 +215,24 @@ class DataFlowAnalyzer:
             # Analyze the contained expression
             if hasattr(statement, 'expression') and statement.expression:
                 self._analyze_expression(statement.expression, graph)
+        elif isinstance(statement, VariableDeclaration):
+            # Variable declaration - track as a write point
+            if hasattr(statement, 'name') and statement.name:
+                # The declaration itself is a write
+                write_point = DataFlowPoint(
+                    node=statement,
+                    variable_name=statement.name,
+                    is_write=True,
+                    flow_type=FlowType.DECLARATION
+                )
+                graph.add_point(write_point)
+
+                # If there's an initial value, analyze it and create a flow edge
+                if hasattr(statement, 'initial_value') and statement.initial_value:
+                    self._analyze_expression(statement.initial_value, graph)
+        elif isinstance(statement, GenericStatement):
+            # Handle generic statements - many variable declarations appear as these
+            self._analyze_generic_statement(statement, graph)
         elif isinstance(statement, CallExpression):
             self._analyze_call(statement, graph)
         elif isinstance(statement, ReturnStatement):
@@ -225,6 +249,51 @@ class DataFlowAnalyzer:
         # Analyze expression if this statement has one
         if hasattr(statement, 'expression') and statement.expression:
             self._analyze_expression(statement.expression, graph)
+
+    def _analyze_generic_statement(self, statement: GenericStatement, graph: DataFlowGraph):
+        """Analyze a generic statement which might contain variable declarations."""
+        source = statement.get_source_code()
+
+        # Check if this is a variable declaration with assignment
+        import re
+        var_decl_pattern = r'(uint256|int256|bool|address|string|bytes\d*)\s+(\w+)\s*=\s*(.+);'
+        match = re.match(var_decl_pattern, source.strip())
+
+        if match:
+            var_type, var_name, var_value = match.groups()
+
+            # Create a write point for the variable declaration
+            write_point = DataFlowPoint(
+                node=statement,
+                variable_name=var_name,
+                is_write=True,
+                flow_type=FlowType.DECLARATION
+            )
+            graph.add_point(write_point)
+
+            # Try to find variables in the value expression and create read points
+            # This is a simplified approach - we look for identifiers in the value
+            identifier_pattern = r'\b(\w+)\b'
+            identifiers = re.findall(identifier_pattern, var_value)
+
+            for identifier in identifiers:
+                # Skip keywords and literals
+                if identifier not in ['uint256', 'int256', 'bool', 'address', 'string', 'true', 'false'] and not identifier.isdigit():
+                    read_point = DataFlowPoint(
+                        node=statement,  # We use the statement as the node since we don't have the actual identifier node
+                        variable_name=identifier,
+                        is_read=True,
+                        flow_type=FlowType.DIRECT
+                    )
+                    graph.add_point(read_point)
+
+        # Handle if statements - analyze nested statements
+        elif source.strip().startswith('if'):
+            if hasattr(statement, 'body') and statement.body:
+                if hasattr(statement.body, 'statements'):
+                    self._analyze_statement_block(statement.body.statements, graph)
+                elif isinstance(statement.body, list):
+                    self._analyze_statement_block(statement.body, graph)
 
     def _analyze_assignment(self, assignment: Expression, graph: DataFlowGraph):
         """Analyze an assignment expression (simplified implementation)."""

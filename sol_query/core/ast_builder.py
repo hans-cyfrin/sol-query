@@ -11,7 +11,7 @@ from sol_query.core.ast_nodes import (
     EnumDeclaration, Parameter, Block, Statement, Expression, Identifier,
     Literal, CallExpression, BinaryExpression, ArrayAccess, SliceAccess,
     ParenthesizedExpression, InlineArrayExpression, NewExpression, StructExpression,
-    ReturnStatement, ExpressionStatement, GenericStatement,
+    ReturnStatement, ExpressionStatement, GenericStatement, ImportStatement,
     Visibility, StateMutability, NodeType
 )
 from sol_query.core.parser import SolidityParser
@@ -40,6 +40,7 @@ class ASTBuilder:
 
         # Mapping of tree-sitter node types to our AST node types
         self.node_type_mapping = {
+            "import_directive": self._build_import,
             "contract_declaration": self._build_contract,
             "interface_declaration": self._build_contract,
             "library_declaration": self._build_contract,
@@ -290,14 +291,12 @@ class ASTBuilder:
             if modifier_name:
                 modifiers.append(modifier_name)
 
-        # Get parameters
+        # Get parameters - they are direct children of the function node
         parameters = []
-        param_list_node = self._find_child_by_type(node, "parameter_list")
-        if param_list_node:
-            for param_node in self._find_children_by_type(param_list_node, "parameter"):
-                param = self.build_node(param_node)
-                if param and isinstance(param, Parameter):
-                    parameters.append(param)
+        for param_node in self._find_children_by_type(node, "parameter"):
+            param = self.build_node(param_node)
+            if param and isinstance(param, Parameter):
+                parameters.append(param)
 
         # Get return parameters
         return_parameters = []
@@ -616,15 +615,15 @@ class ASTBuilder:
                 name="unknown"
             )
 
-        # Get arguments
+        # Get arguments - they are individual call_argument nodes
         arguments = []
-        arg_list_node = self._find_child_by_type(node, "call_arguments")
-        if arg_list_node:
-            for arg_node in arg_list_node.children:
-                if arg_node.type != "(" and arg_node.type != ")" and arg_node.type != ",":
-                    arg = self.build_node(arg_node)
-                    if arg and isinstance(arg, Expression):
-                        arguments.append(arg)
+        for arg_node in self._find_children_by_type(node, "call_argument"):
+            # Each call_argument contains an expression
+            expr_node = self._find_child_by_type(arg_node, "expression")
+            if expr_node:
+                arg = self.build_node(expr_node)
+                if arg and isinstance(arg, Expression):
+                    arguments.append(arg)
 
         return CallExpression(
             source_location=self._get_source_location(node),
@@ -754,12 +753,18 @@ class ASTBuilder:
 
     def _build_variable_declaration_statement(self, node: tree_sitter.Node) -> Statement:
         """Build a variable declaration statement."""
-        # For now, create a generic statement
-        # This would need more sophisticated parsing for full variable declarations
-        return GenericStatement(
+        # Extract ALL expressions recursively from the variable declaration
+        expressions = self._extract_all_expressions_recursively(node)
+
+        # Create a generic statement with nested expressions
+        stmt = GenericStatement(
             source_location=self._get_source_location(node),
             raw_node=node
         )
+
+        # Store expressions for traversal
+        stmt._nested_expressions = expressions
+        return stmt
 
     def _build_if_statement(self, node: tree_sitter.Node) -> Statement:
         """Build an if statement and extract ALL its expressions recursively."""
@@ -848,13 +853,38 @@ class ASTBuilder:
 
     def _build_assignment(self, node: tree_sitter.Node) -> Expression:
         """Build an assignment expression."""
-        text = self._get_node_text(node)
-        return Literal(
+        # Parse assignment as a binary expression with left, operator, right
+        left = None
+        right = None
+        operator = "="
+        
+        # Find left and right operands
+        children = [child for child in node.children if child.type not in ["=", ";"]]
+        if len(children) >= 2:
+            left_node = children[0]
+            right_node = children[1]
+            
+            left = self.build_node(left_node)
+            right = self.build_node(right_node)
+        
+        # If we couldn't parse properly, fallback to identifiers
+        if not isinstance(left, Expression):
+            left = Identifier(
+                source_location=self._get_source_location(node),
+                name="unknown_left"
+            )
+        if not isinstance(right, Expression):
+            right = Identifier(
+                source_location=self._get_source_location(node),
+                name="unknown_right"
+            )
+        
+        return BinaryExpression(
             source_location=self._get_source_location(node),
             raw_node=node,
-            node_type=NodeType.ASSIGNMENT_EXPRESSION,
-            value=text if text else "assignment",
-            literal_type="assignment"
+            left=left,
+            operator=operator,
+            right=right
         )
 
     def _build_augmented_assignment(self, node: tree_sitter.Node) -> Expression:
@@ -1082,6 +1112,66 @@ class ASTBuilder:
             raw_node=node,
             elements=elements
         )
+
+    def _build_import(self, node: tree_sitter.Node) -> ImportStatement:
+        """Build an import statement."""
+        import_path = ""
+        imported_symbols = []
+        alias = None
+        import_type = "file"  # Default import type
+
+        # Parse the import structure
+        for child in node.children:
+            if child.type == "string":
+                # Extract the import path from string literal
+                import_path = child.text.decode('utf-8').strip('"\'')
+            elif child.type == "import_clause":
+                # Handle selective imports: import { symbol1, symbol2 } from "path"
+                import_type = "selective"
+                imported_symbols = self._parse_import_symbols(child)
+            elif child.type == "identifier":
+                # Handle direct imports: import Symbol from "path"
+                import_type = "direct"
+                imported_symbols = [child.text.decode('utf-8')]
+            elif child.type == "as_clause":
+                # Handle aliased imports: import "path" as Alias
+                alias = self._parse_alias(child)
+
+        # If no specific symbols were imported, it's a file import
+        if not imported_symbols and not alias:
+            import_type = "file"
+
+        return ImportStatement(
+            source_location=self._get_source_location(node),
+            raw_node=node,
+            import_path=import_path,
+            import_type=import_type,
+            imported_symbols=imported_symbols,
+            alias=alias
+        )
+
+    def _parse_import_symbols(self, import_clause_node: tree_sitter.Node) -> List[str]:
+        """Parse symbols from an import clause."""
+        symbols = []
+
+        for child in import_clause_node.children:
+            if child.type == "identifier":
+                symbols.append(child.text.decode('utf-8'))
+            elif child.type == "import_specifier":
+                # Handle import specifiers like { Symbol as Alias }
+                for spec_child in child.children:
+                    if spec_child.type == "identifier":
+                        symbols.append(spec_child.text.decode('utf-8'))
+                        break  # Take the first identifier (original name)
+
+        return symbols
+
+    def _parse_alias(self, as_clause_node: tree_sitter.Node) -> Optional[str]:
+        """Parse alias from an as clause."""
+        for child in as_clause_node.children:
+            if child.type == "identifier":
+                return child.text.decode('utf-8')
+        return None
 
     def _build_new_expression(self, node: tree_sitter.Node) -> Expression:
         """Build a new expression."""

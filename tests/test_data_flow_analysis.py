@@ -94,7 +94,7 @@ class TestVariableTracker:
         """Test tracking variable reads and writes."""
         tracker = VariableTracker()
 
-        # Find transfer function
+        # Find transfer function which directly accesses balances mapping
         transfer_func = engine_with_sample.functions.with_name("transfer").first()
         references = tracker.track_function(transfer_func)
 

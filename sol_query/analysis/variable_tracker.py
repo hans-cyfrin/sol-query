@@ -98,6 +98,7 @@ class VariableTracker:
         """Track variable references in a statement."""
         references = []
 
+        # Handle specific statement types
         if isinstance(statement, ExpressionStatement):
             if hasattr(statement, 'expression') and statement.expression:
                 references.extend(self._track_expression(statement.expression, statement, function, is_read=True))
@@ -109,6 +110,11 @@ class VariableTracker:
             # If/while/for statements with conditions
             if statement.condition:
                 references.extend(self._track_expression(statement.condition, statement, function, is_read=True))
+        else:
+            # Handle generic statements that may have nested expressions
+            if hasattr(statement, '_nested_expressions') and statement._nested_expressions:
+                for expr in statement._nested_expressions:
+                    references.extend(self._track_expression(expr, statement, function, is_read=True))
 
         # Track nested statements
         if hasattr(statement, 'statements') and statement.statements:
@@ -135,10 +141,6 @@ class VariableTracker:
                     references.extend(self._track_statement(nested_stmt, function))
             else:
                 references.extend(self._track_statement(statement.else_statement, function))
-
-        # Track expressions in statement
-        if hasattr(statement, 'expression') and statement.expression:
-            references.extend(self._track_expression(statement.expression, statement, function, is_read=True))
 
         return references
 
@@ -216,17 +218,15 @@ class VariableTracker:
 
         elif isinstance(expression, ArrayAccess):
             # Array[index] access
-            if hasattr(expression, 'object') and expression.object:
-                references.extend(self._track_expression(expression.object, statement, function, is_read=True))
-
+            # Index is always a read (to determine which element to access)
             if hasattr(expression, 'index') and expression.index:
                 references.extend(self._track_expression(expression.index, statement, function, is_read=True))
 
-            # The indexed access itself
-            if hasattr(expression, 'object') and isinstance(expression.object, Identifier):
-                if hasattr(expression.object, 'name'):
+            # The array base itself inherits the read/write from the context
+            if hasattr(expression, 'base') and isinstance(expression.base, Identifier):
+                if hasattr(expression.base, 'name'):
                     ref = VariableReference(
-                        variable_name=expression.object.name,
+                        variable_name=expression.base.name,
                         statement=statement,
                         expression_context=expression,
                         is_read=is_read,
@@ -235,16 +235,81 @@ class VariableTracker:
                         scope_function=function
                     )
                     references.append(ref)
+            elif hasattr(expression, 'base') and expression.base:
+                # Handle non-identifier base (e.g., nested array access)
+                references.extend(self._track_expression(expression.base, statement, function, is_read=is_read, is_write=is_write))
 
         elif isinstance(expression, BinaryExpression):
-            # Binary operations
-            if hasattr(expression, 'left') and expression.left:
-                references.extend(self._track_expression(expression.left, statement, function, is_read=True))
-            if hasattr(expression, 'right') and expression.right:
-                references.extend(self._track_expression(expression.right, statement, function, is_read=True))
+            # Binary operations - handle assignment vs other operations
+            if hasattr(expression, 'operator'):
+                operator = expression.operator
+                if operator == '=':
+                    # Assignment: left side is write, right side is read
+                    if hasattr(expression, 'left') and expression.left:
+                        references.extend(self._track_expression(expression.left, statement, function, is_read=False, is_write=True))
+                    if hasattr(expression, 'right') and expression.right:
+                        references.extend(self._track_expression(expression.right, statement, function, is_read=True))
+                elif operator in ['+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=']:
+                    # Compound assignment: left side is both read and write, right side is read
+                    if hasattr(expression, 'left') and expression.left:
+                        references.extend(self._track_expression(expression.left, statement, function, is_read=True, is_write=True))
+                    if hasattr(expression, 'right') and expression.right:
+                        references.extend(self._track_expression(expression.right, statement, function, is_read=True))
+                else:
+                    # Other binary operations: both sides are reads
+                    if hasattr(expression, 'left') and expression.left:
+                        references.extend(self._track_expression(expression.left, statement, function, is_read=True))
+                    if hasattr(expression, 'right') and expression.right:
+                        references.extend(self._track_expression(expression.right, statement, function, is_read=True))
+            else:
+                # No operator detected, treat as reads
+                if hasattr(expression, 'left') and expression.left:
+                    references.extend(self._track_expression(expression.left, statement, function, is_read=True))
+                if hasattr(expression, 'right') and expression.right:
+                    references.extend(self._track_expression(expression.right, statement, function, is_read=True))
+
+        # Handle assignment expressions (compound assignments like +=, -=, etc.)
+        elif hasattr(expression, 'node_type') and str(expression.node_type) == 'NodeType.ASSIGNMENT_EXPRESSION':
+            # For assignment expressions, we need to parse the source to understand the structure
+            source = expression.get_source_code()
+            # Look for patterns like "variable += value" or "array[index] -= value"
+            if any(op in source for op in ['+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '++', '--']):
+                # This is a compound assignment - the left side is both read and written
+                # Try to extract the variable being assigned
+                import re
+
+                # Pattern for simple variable assignment: var += expr
+                simple_match = re.match(r'(\w+)\s*[+\-*/%&|^<>]+?=', source)
+                if simple_match:
+                    var_name = simple_match.group(1)
+                    ref = VariableReference(
+                        variable_name=var_name,
+                        statement=statement,
+                        expression_context=expression,
+                        is_read=True,
+                        is_write=True,
+                        access_type='direct',
+                        scope_function=function
+                    )
+                    references.append(ref)
+
+                # Pattern for array access assignment: array[index] += expr
+                array_match = re.match(r'(\w+)\s*\[[^\]]+\]\s*[+\-*/%&|^<>]+?=', source)
+                if array_match:
+                    var_name = array_match.group(1)
+                    ref = VariableReference(
+                        variable_name=var_name,
+                        statement=statement,
+                        expression_context=expression,
+                        is_read=True,
+                        is_write=True,
+                        access_type='index',
+                        scope_function=function
+                    )
+                    references.append(ref)
 
         # Handle any expression with operands generically
-        if hasattr(expression, 'operand') and expression.operand:
+        elif hasattr(expression, 'operand') and expression.operand:
             references.extend(self._track_expression(expression.operand, statement, function, is_read=True))
 
         elif isinstance(expression, CallExpression):

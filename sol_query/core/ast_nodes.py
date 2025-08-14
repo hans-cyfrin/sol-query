@@ -46,6 +46,7 @@ class NodeType(str, Enum):
     ENUM = "enum"
     EVENT = "event"
     ERROR = "error"
+    IMPORT = "import"
 
     # Statements
     IF_STATEMENT = "if_statement"
@@ -792,3 +793,55 @@ class StructExpression(Expression):
         children = [self.type_expr]
         children.extend(self.fields)
         return children
+
+
+class ImportStatement(ASTNode):
+    """Represents an import statement."""
+
+    node_type: NodeType = Field(default=NodeType.IMPORT, frozen=True)
+    import_path: str = Field(description="The path being imported")
+    import_type: str = Field(description="Type of import (file, symbol, etc.)")
+    imported_symbols: List[str] = Field(
+        default_factory=list,
+        description="Specific symbols being imported (for selective imports)"
+    )
+    alias: Optional[str] = Field(
+        default=None,
+        description="Alias for the import (as clause)"
+    )
+
+    def get_imported_names(self) -> List[str]:
+        """Get all names made available by this import."""
+        if self.imported_symbols:
+            return self.imported_symbols
+        elif self.alias:
+            return [self.alias]
+        else:
+            # Extract filename from path for default imports
+            path_parts = self.import_path.split('/')
+            filename = path_parts[-1]
+            if filename.endswith('.sol'):
+                filename = filename[:-4]  # Remove .sol extension
+            return [filename]
+
+    def matches_pattern(self, pattern: str) -> bool:
+        """Check if import matches a pattern."""
+        import re
+
+        # Convert wildcard pattern to regex
+        regex_pattern = pattern.replace('*', '.*')
+
+        # Check import path
+        if re.search(regex_pattern, self.import_path, re.IGNORECASE):
+            return True
+
+        # Check imported symbols
+        for symbol in self.imported_symbols:
+            if re.search(regex_pattern, symbol, re.IGNORECASE):
+                return True
+
+        # Check alias
+        if self.alias and re.search(regex_pattern, self.alias, re.IGNORECASE):
+            return True
+
+        return False

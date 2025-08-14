@@ -230,15 +230,19 @@ class CallTypeDetector:
         if self._matches_any(source_code, self.compiled_type_conversion):
             return CallType.TYPE_CONVERSION
 
-        # 10. Library calls
+        # 10. Internal calls via this
+        if source_code.strip().startswith('this.'):
+            return CallType.INTERNAL
+
+        # 11. Library calls
         if self._is_library_call(source_code, context):
             return CallType.LIBRARY
 
-        # 11. Internal vs external based on context
+        # 12. Internal vs external based on context
         if context:
             return self._classify_by_context(source_code, context)
 
-        # 12. Default classification based on patterns
+        # 13. Default classification based on patterns
         return self._classify_default(source_code)
 
     def _matches_any(self, source_code: str, compiled_patterns: List[Pattern]) -> bool:
@@ -306,8 +310,12 @@ class CallTypeDetector:
     def _classify_default(self, source_code: str) -> CallType:
         """Default classification based on common patterns."""
         # Simple function call pattern: functionName(args)
-        simple_call_pattern = re.compile(r'^[a-z]\w*\s*\(', re.IGNORECASE)
+        simple_call_pattern = re.compile(r'^[a-z_]\w*\s*\(', re.IGNORECASE)
         if simple_call_pattern.match(source_code):
+            return CallType.INTERNAL
+
+        # this.method() calls are internal
+        if source_code.startswith('this.'):
             return CallType.INTERNAL
 
         # Member access pattern: object.method(args)

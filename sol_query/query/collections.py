@@ -39,7 +39,13 @@ class BaseCollection(ABC):
 
     def __getitem__(self, index: Union[int, slice]):
         """Get element(s) by index."""
-        return self._elements[index]
+        if isinstance(index, slice):
+            # For slicing, return a new collection of the same type
+            sliced_elements = self._elements[index]
+            return self._create_new_collection(sliced_elements)
+        else:
+            # For single index, return the element
+            return self._elements[index]
 
     def list(self) -> List[ASTNode]:
         """Get the underlying list of elements."""
@@ -65,6 +71,145 @@ class BaseCollection(ABC):
     def _create_new_collection(self, elements: List[ASTNode]) -> "BaseCollection":
         """Create a new collection of the same type with filtered elements."""
         pass
+
+    # ===== QUERY COMPOSITION OPERATORS =====
+
+    def where(self, predicate: Callable[[ASTNode], bool]) -> "BaseCollection":
+        """
+        Filter elements using a custom predicate function.
+        
+        Args:
+            predicate: Function that takes an element and returns True to include it
+            
+        Returns:
+            New collection with elements matching the predicate
+            
+        Example:
+            # Find functions with more than 5 parameters
+            complex_funcs = engine.functions.where(lambda f: len(f.parameters) > 5)
+        """
+        filtered = [element for element in self._elements if predicate(element)]
+        return self._create_new_collection(filtered)
+
+    def and_filter(self, condition: Callable[[ASTNode], bool]) -> "BaseCollection":
+        """
+        Apply an additional filter condition (logical AND).
+        
+        Args:
+            condition: Additional condition that elements must satisfy
+            
+        Returns:
+            New collection with elements satisfying the additional condition
+            
+        Example:
+            # Chain multiple conditions
+            risky_funcs = (engine.functions
+                .with_external_calls()
+                .and_filter(lambda f: f.has_asset_transfers)
+            )
+        """
+        return self.where(condition)
+
+    def and_not(self, condition: Callable[[ASTNode], bool]) -> "BaseCollection":
+        """
+        Exclude elements matching a condition (logical AND NOT).
+        
+        Args:
+            condition: Condition to exclude (elements matching this are removed)
+            
+        Returns:
+            New collection excluding elements that match the condition
+            
+        Example:
+            # Find functions with external calls but not view functions
+            funcs = (engine.functions
+                .with_external_calls()
+                .and_not(lambda f: f.is_view())
+            )
+        """
+        filtered = [element for element in self._elements if not condition(element)]
+        return self._create_new_collection(filtered)
+
+    def or_with(self, other_collection: "BaseCollection") -> "BaseCollection":
+        """
+        Combine this collection with another (logical OR / union).
+        
+        Args:
+            other_collection: Collection to combine with
+            
+        Returns:
+            New collection containing elements from both collections (no duplicates)
+            
+        Example:
+            # Combine public and external functions
+            public_or_external = (engine.functions.public()
+                .or_with(engine.functions.external())
+            )
+        """
+        return self.union(other_collection)
+
+    def intersect(self, other_collection: "BaseCollection") -> "BaseCollection":
+        """
+        Find elements present in both collections (set intersection).
+        
+        Args:
+            other_collection: Collection to intersect with
+            
+        Returns:
+            New collection with elements present in both collections
+            
+        Example:
+            # Find functions that are both payable and have external calls
+            risky = (engine.functions.payable()
+                .intersect(engine.functions.with_external_calls())
+            )
+        """
+        # Use element IDs for comparison to handle object identity
+        other_ids = {id(elem) for elem in other_collection.list()}
+        intersected = [elem for elem in self._elements if id(elem) in other_ids]
+        return self._create_new_collection(intersected)
+
+    def union(self, other_collection: "BaseCollection") -> "BaseCollection":
+        """
+        Combine collections without duplicates (set union).
+        
+        Args:
+            other_collection: Collection to combine with
+            
+        Returns:
+            New collection containing elements from both collections (no duplicates)
+        """
+        # Use element IDs to avoid duplicates
+        seen_ids = {id(elem) for elem in self._elements}
+        result = list(self._elements)
+
+        for elem in other_collection.list():
+            if id(elem) not in seen_ids:
+                result.append(elem)
+                seen_ids.add(id(elem))
+
+        return self._create_new_collection(result)
+
+    def subtract(self, other_collection: "BaseCollection") -> "BaseCollection":
+        """
+        Remove elements present in another collection (set difference).
+        
+        Args:
+            other_collection: Collection of elements to remove
+            
+        Returns:
+            New collection with specified elements removed
+            
+        Example:
+            # Find external functions without reentrancy guards
+            unguarded = (engine.functions.external()
+                .subtract(engine.functions.with_modifiers(["nonReentrant"]))
+            )
+        """
+        # Use element IDs for comparison
+        subtract_ids = {id(elem) for elem in other_collection.list()}
+        remaining = [elem for elem in self._elements if id(elem) not in subtract_ids]
+        return self._create_new_collection(remaining)
 
 
 class ContractCollection(BaseCollection):
@@ -180,6 +325,27 @@ class ContractCollection(BaseCollection):
             if not any(self._engine.pattern_matcher.matches_name_pattern(v.name, name)
                       for v in contract.variables):
                 filtered.append(contract)
+        return self._create_new_collection(filtered)
+
+    # Import-based filtering methods
+    def using_imports(self, import_patterns: Union[str, List[str]]) -> "ContractCollection":
+        """Filter contracts that use specific imports."""
+        patterns = [import_patterns] if isinstance(import_patterns, str) else import_patterns
+        analyzer = self._engine.import_analyzer()
+        matching_contracts = analyzer.get_contracts_using_imports(patterns)
+
+        # Filter current collection to only include matching contracts
+        filtered = [c for c in self._elements if c in matching_contracts]
+        return self._create_new_collection(filtered)
+
+    def not_using_imports(self, import_patterns: Union[str, List[str]]) -> "ContractCollection":
+        """Filter contracts that do NOT use specific imports."""
+        patterns = [import_patterns] if isinstance(import_patterns, str) else import_patterns
+        analyzer = self._engine.import_analyzer()
+        matching_contracts = analyzer.get_contracts_using_imports(patterns)
+
+        # Filter current collection to exclude matching contracts
+        filtered = [c for c in self._elements if c not in matching_contracts]
         return self._create_new_collection(filtered)
 
     # Navigation methods
@@ -585,6 +751,27 @@ class FunctionCollection(BaseCollection):
 
         return self._create_new_collection(filtered)
 
+    # Import-based filtering methods
+    def calling_imported_symbols(self, import_patterns: Union[str, List[str]]) -> "FunctionCollection":
+        """Filter functions that call symbols from specific imports."""
+        patterns = [import_patterns] if isinstance(import_patterns, str) else import_patterns
+        analyzer = self._engine.import_analyzer()
+        matching_functions = analyzer.get_functions_calling_imported_symbols(patterns)
+
+        # Filter current collection to only include matching functions
+        filtered = [f for f in self._elements if f in matching_functions]
+        return self._create_new_collection(filtered)
+
+    def not_calling_imported_symbols(self, import_patterns: Union[str, List[str]]) -> "FunctionCollection":
+        """Filter functions that do NOT call symbols from specific imports."""
+        patterns = [import_patterns] if isinstance(import_patterns, str) else import_patterns
+        analyzer = self._engine.import_analyzer()
+        matching_functions = analyzer.get_functions_calling_imported_symbols(patterns)
+
+        # Filter current collection to exclude matching functions
+        filtered = [f for f in self._elements if f not in matching_functions]
+        return self._create_new_collection(filtered)
+
 
 class VariableCollection(BaseCollection):
     """Collection of variable declarations with fluent query methods."""
@@ -948,14 +1135,35 @@ class ExpressionCollection(BaseCollection):
 
     def _extract_function_name_from_call(self, call) -> Optional[str]:
         """Helper method to extract function name from a call expression."""
-        if hasattr(call, 'function') and hasattr(call.function, 'name'):
-            return call.function.name
-        else:
-            # Try to extract name from source code
-            source = call.get_source_code()
-            match = re.match(r'(\w+)\s*\(', source)
-            if match:
-                return match.group(1)
+        if hasattr(call, 'function'):
+            function = call.function
+
+            # Case 1: Direct identifier (simple function calls)
+            if hasattr(function, 'name'):
+                return function.name
+
+            # Case 2: Member access (object.method calls)
+            elif hasattr(function, 'value') and hasattr(function, 'literal_type'):
+                if function.literal_type in ['member_expression', 'member_access']:
+                    # Extract method name from member access like "token.transfer"
+                    member_text = function.value
+                    if '.' in member_text:
+                        return member_text.split('.')[-1]
+                    return member_text
+
+        # Fallback: Try to extract name from source code using regex
+        source = call.get_source_code()
+
+        # Pattern for member access: object.method(...)
+        member_match = re.search(r'\.(\w+)\s*\(', source)
+        if member_match:
+            return member_match.group(1)
+
+        # Pattern for direct calls: method(...)
+        direct_match = re.match(r'(\w+)\s*\(', source)
+        if direct_match:
+            return direct_match.group(1)
+
         return None
 
     # Call type filtering methods

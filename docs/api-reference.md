@@ -2,502 +2,507 @@
 
 Complete reference for the Sol-Query Solidity code analysis engine.
 
-## Quick Start
-
-```python
-from sol_query import SolidityQueryEngine
-
-# Initialize and load sources
-engine = SolidityQueryEngine("path/to/contracts")
-# or
-engine = SolidityQueryEngine()
-engine.load_sources(["contract1.sol", "directory/"])
-
-# Traditional API
-contracts = engine.find_contracts(name_patterns="*Token*")
-functions = engine.find_functions(visibility="external", with_external_calls=True)
-
-# Fluent API
-external_funcs = engine.contracts.with_name("MyContract").functions.external()
-```
-
 ## Core Classes
 
 ### SolidityQueryEngine
 
-Main query engine providing both traditional and fluent interfaces.
+Main query engine providing comprehensive Solidity code analysis capabilities.
 
 #### Constructor
+
 ```python
 SolidityQueryEngine(source_paths: Optional[Union[str, Path, List[Union[str, Path]]]] = None)
 ```
 
-#### Source Management
-- `load_sources(source_paths)` - Load Solidity files/directories
-- `get_statistics()` - Get parsing and analysis statistics
+**Parameters:**
+- `source_paths`: Optional path(s) to load initially. Can be:
+  - String or Path to a file or directory
+  - List of strings/Paths for multiple sources
 
-#### Traditional API Methods
+## Source Management
 
-**Contract Queries:**
-- `find_contracts(name_patterns=None, inheritance=None, kind=None, **filters)`
-  - `name_patterns`: str/List[str]/Pattern - Name patterns to match
-  - `inheritance`: str/List[str] - Base contracts/interfaces
-  - `kind`: str - "contract", "interface", "library", "abstract"
+### `load_sources(source_paths: Union[str, Path, List[Union[str, Path]]]) -> None`
+Load source files or directories.
 
-- `find_structs(name_patterns=None, contract_name=None, **filters)`
-- `find_enums(name_patterns=None, contract_name=None, **filters)`
-- `find_errors(name_patterns=None, contract_name=None, **filters)`
+**Parameters:**
+- `source_paths`: Path(s) to load (files, directories, or lists thereof)
 
-**Function Queries:**
-- `find_functions(name_patterns=None, visibility=None, modifiers=None, state_mutability=None, contract_name=None, with_external_calls=None, with_asset_transfers=None, with_external_calls_deep=None, with_asset_transfers_deep=None, **filters)`
-  - `visibility`: Visibility enum or list - Function visibility
-  - `state_mutability`: StateMutability enum or list - State mutability
-  - `modifiers`: str/List[str] - Required modifiers
-  - `with_external_calls`: bool - Has direct external calls
-  - `with_external_calls_deep`: bool - Has external calls (including transitively)
-  - `with_asset_transfers`: bool - Has direct asset transfers
-  - `with_asset_transfers_deep`: bool - Has asset transfers (including transitively)
+## Traditional Finder Methods
 
-- `find_modifiers(name_patterns=None, contract_name=None, **filters)`
+### Contract Discovery
 
-**Variable Queries:**
-- `find_variables(name_patterns=None, type_patterns=None, visibility=None, is_state_variable=None, contract_name=None, **filters)`
-  - `type_patterns`: str/List[str] - Type name patterns
-  - `is_state_variable`: bool - Filter for state variables only
+#### `find_contracts(name_patterns=None, inheritance=None, kind=None, **filters) -> List[ContractDeclaration]`
+Find contracts matching specified criteria.
 
-**Event Queries:**
-- `find_events(name_patterns=None, contract_name=None, **filters)`
+**Parameters:**
+- `name_patterns`: Name patterns to match (string, regex, or list)
+- `inheritance`: Base contracts/interfaces this contract inherits from (string or list)
+- `kind`: Contract kind - one of: `"contract"`, `"interface"`, `"library"`, `"abstract"`
+- `**filters`: Additional filter conditions
 
-**Statement Queries:**
-- `find_statements(statement_types=None, contract_name=None, function_name=None, **filters)`
-- `find_loops(loop_types=None, **filters)`
-- `find_conditionals(**filters)`
-- `find_assignments(**filters)`
-- `find_returns(**filters)`
-- `find_requires(**filters)`
-- `find_emits(**filters)`
+#### `find_modifiers(name_patterns=None, contract_name=None, **filters) -> List[ModifierDeclaration]`
+Find modifier declarations.
 
-**Expression Queries:**
-- `find_expressions(expression_types=None, **filters)`
-- `find_calls(call_types=None, function_names=None, **filters)`
-  - `call_types`: CallType enum or list - Type of calls to find
-  - `function_names`: str/List[str] - Function names being called
-- `find_literals(literal_types=None, values=None, **filters)`
-- `find_identifiers(names=None, **filters)`
+**Parameters:**
+- `name_patterns`: Modifier name patterns to match (string, regex, or list)
+- `contract_name`: Name of contract containing the modifier
+- `**filters`: Additional filter conditions
 
-**Call Analysis:**
-- `find_external_calls(**filters)` - Find all external calls
-- `find_asset_transfers(**filters)` - Find asset transfer operations
-- `analyze_call_graph(contract_name=None)` - Build call graph analysis
+#### `find_events(name_patterns=None, contract_name=None, **filters) -> List[EventDeclaration]`
+Find event declarations.
 
-**Data Flow Analysis:**
-- `trace_variable_flow(variable_name, function_name, contract_name=None)`
-- `find_variable_influences(variable_name, function_name, contract_name=None)`
-- `find_variable_effects(variable_name, function_name, contract_name=None)`
-- `trace_flow_between_statements(source_stmt, target_stmt)`
+**Parameters:**
+- `name_patterns`: Event name patterns to match (string, regex, or list)
+- `contract_name`: Name of contract containing the event
+- `**filters`: Additional filter conditions
 
-**Import Analysis:**
-- `analyze_imports(pattern="*")` - Analyze import dependencies
-- `find_import_usage(import_pattern)` - Find usage of imported symbols
+#### `find_structs(name_patterns=None, contract_name=None, **filters) -> List[StructDeclaration]`
+Find struct declarations.
 
-#### Fluent API Properties
+**Parameters:**
+- `name_patterns`: Struct name patterns to match (string, regex, or list)
+- `contract_name`: Name of contract containing the struct
+- `**filters`: Additional filter conditions
 
-Access collections for fluent querying:
-- `contracts` → ContractCollection
-- `functions` → FunctionCollection
-- `variables` → VariableCollection
-- `modifiers` → ModifierCollection
-- `events` → EventCollection
-- `statements` → StatementCollection
-- `expressions` → ExpressionCollection
+#### `find_enums(name_patterns=None, contract_name=None, **filters) -> List[EnumDeclaration]`
+Find enum declarations.
 
-## Collection Classes
+**Parameters:**
+- `name_patterns`: Enum name patterns to match (string, regex, or list)
+- `contract_name`: Name of contract containing the enum
+- `**filters`: Additional filter conditions
 
-All collections support method chaining and set operations.
+#### `find_errors(name_patterns=None, contract_name=None, **filters) -> List[ErrorDeclaration]`
+Find custom error declarations.
 
-### ContractCollection
+**Parameters:**
+- `name_patterns`: Error name patterns to match (string, regex, or list)
+- `contract_name`: Name of contract containing the error
+- `**filters`: Additional filter conditions
 
-**Filtering:**
-- `with_name(patterns)` - Filter by name patterns
-- `interfaces()` - Interface contracts only
-- `libraries()` - Library contracts only
-- `abstract()` - Abstract contracts only
-- `inheriting_from(base_names)` - Contracts inheriting from bases
-- `using_imports(import_patterns)` - Contracts using specific imports
+### Function Discovery
 
-**Navigation:**
-- `get_functions()` → FunctionCollection
-- `get_variables()` → VariableCollection
-- `get_events()` → EventCollection
-- `get_modifiers()` → ModifierCollection
+#### `find_functions(name_patterns=None, visibility=None, modifiers=None, state_mutability=None, contract_name=None, with_external_calls=None, with_asset_transfers=None, with_external_calls_deep=None, with_asset_transfers_deep=None, **filters) -> List[FunctionDeclaration]`
+Find functions matching specified criteria.
 
-**Set Operations:**
-- `intersect(other)` - Intersection with another collection
-- `union(other)` - Union with another collection
-- `subtract(other)` - Difference from another collection
+**Parameters:**
+- `name_patterns`: Function name patterns to match (string, regex, or list)
+- `visibility`: Function visibility - one or list of:
+  - `Visibility.PUBLIC` (`"public"`)
+  - `Visibility.PRIVATE` (`"private"`)
+  - `Visibility.INTERNAL` (`"internal"`)
+  - `Visibility.EXTERNAL` (`"external"`)
+- `modifiers`: Modifier names that must be present (string or list)
+- `state_mutability`: State mutability - one or list of:
+  - `StateMutability.PURE` (`"pure"`)
+  - `StateMutability.VIEW` (`"view"`)
+  - `StateMutability.NONPAYABLE` (`"nonpayable"`)
+  - `StateMutability.PAYABLE` (`"payable"`)
+- `contract_name`: Name of contract containing the function
+- `with_external_calls`: Filter by functions with direct external calls (boolean)
+- `with_asset_transfers`: Filter by functions with direct asset transfers (boolean)
+- `with_external_calls_deep`: Filter by functions with external calls in call tree (boolean)
+- `with_asset_transfers_deep`: Filter by functions with asset transfers in call tree (boolean)
+- `**filters`: Additional filter conditions
 
-### FunctionCollection
+### Variable Discovery
 
-**Visibility Filters:**
-- `external()` - External functions only
-- `public()` - Public functions only
-- `internal()` - Internal functions only
-- `private()` - Private functions only
+#### `find_variables(name_patterns=None, type_patterns=None, visibility=None, is_state_variable=None, contract_name=None, **filters) -> List[VariableDeclaration]`
+Find variables matching specified criteria.
 
-**State Mutability Filters:**
-- `view()` - View functions only
-- `pure()` - Pure functions only
-- `payable()` - Payable functions only
+**Parameters:**
+- `name_patterns`: Variable name patterns to match (string, regex, or list)
+- `type_patterns`: Variable type patterns to match (string, regex, or list)
+- `visibility`: Variable visibility - same values as function visibility
+- `is_state_variable`: Whether to find only state variables (boolean)
+- `contract_name`: Name of contract containing the variable
+- `**filters`: Additional filter conditions
 
-**Special Function Types:**
-- `constructors()` - Constructor functions
-- `modifiers_applied(modifier_names)` - Functions with specific modifiers
+### Statement Discovery
 
-**Call Analysis Filters:**
-- `with_external_calls(deep=False)` - Functions with external calls
-- `without_external_calls(deep=False)` - Functions without external calls
-- `with_asset_transfers(deep=False)` - Functions with asset transfers
-- `without_asset_transfers(deep=False)` - Functions without asset transfers
+#### `find_statements(statement_types=None, contract_name=None, function_name=None, **filters) -> List[Statement]`
+Find statements matching specified criteria.
 
-**Data Flow Methods:**
-- `reading_variable(variable_name)` - Functions reading a variable
-- `writing_variable(variable_name)` - Functions writing a variable
-- `data_flow_between(source, target)` - Functions with data flow between statements
+**Parameters:**
+- `statement_types`: Types of statements to find (string or list)
+- `contract_name`: Name of contract to search in
+- `function_name`: Name of function to search in
+- `**filters`: Additional filter conditions
 
-### VariableCollection
+#### `find_loops(loop_types=None, contract_name=None, function_name=None, **filters) -> List[Statement]`
+Find loop statements.
 
-**Type Filters:**
-- `with_type(type_patterns)` - Variables matching type patterns
-- `state_variables()` - State variables only
-- `local_variables()` - Local variables only
+**Parameters:**
+- `loop_types`: Types of loops to find - one or list of: `"for"`, `"while"`, `"do-while"`
+- `contract_name`: Name of contract to search in
+- `function_name`: Name of function to search in
+- `**filters`: Additional filter conditions
 
-**Visibility Filters:**
-- `public()` - Public state variables
-- `private()` - Private state variables
-- `internal()` - Internal state variables
+#### `find_conditionals(contract_name=None, function_name=None, **filters) -> List[Statement]`
+Find conditional statements (if/else).
 
-### StatementCollection
+#### `find_assignments(contract_name=None, function_name=None, **filters) -> List[Statement]`
+Find assignment statements.
 
-**Type Filters:**
-- `loops()` - Loop statements
-- `conditionals()` - If/else statements
-- `assignments()` - Assignment statements
-- `returns()` - Return statements
-- `requires()` - Require statements
-- `emits()` - Emit statements
+#### `find_returns(contract_name=None, function_name=None, **filters) -> List[Statement]`
+Find return statements.
 
-**Source Pattern Filters:**
-- `with_source_pattern(pattern)` - Statements matching source code pattern
+#### `find_requires(contract_name=None, function_name=None, **filters) -> List[Statement]`
+Find require statements.
 
-**Data Flow Methods:**
-- `influenced_by_variable(variable_name)` - Statements influenced by variable
-- `influencing_variable(variable_name)` - Statements influencing variable
-- `expand_backward_flow(max_depth=5)` - Expand to influencing statements
-- `expand_forward_flow(max_depth=5)` - Expand to influenced statements
+#### `find_emits(contract_name=None, function_name=None, **filters) -> List[Statement]`
+Find emit statements.
 
-### ExpressionCollection
+### Expression Discovery
 
-**Type Filters:**
-- `calls()` - Call expressions
-- `literals()` - Literal expressions
-- `identifiers()` - Identifier expressions
-- `binary_ops()` - Binary expressions
-- `member_access()` - Member access expressions
+#### `find_expressions(expression_types=None, contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find expressions matching specified criteria.
 
-**Call-Specific Filters:**
-- `external_calls()` - External call expressions
-- `internal_calls()` - Internal call expressions
-- `library_calls()` - Library call expressions
-- `low_level_calls()` - Low-level call expressions
+**Parameters:**
+- `expression_types`: Types of expressions to find (string or list)
+- `contract_name`: Name of contract to search in
+- `function_name`: Name of function to search in
+- `**filters`: Additional filter conditions
 
-**Value Filters:**
-- `with_literal_value(values)` - Literals with specific values
-- `with_operator(operators)` - Binary expressions with specific operators
+#### `find_calls(target_patterns=None, contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find function calls.
 
-## AST Node Classes
+**Parameters:**
+- `target_patterns`: Patterns for called function names (string, regex, or list)
+- `contract_name`: Name of contract to search in
+- `function_name`: Name of function to search in
+- `**filters`: Additional filter conditions
 
-### Core Node Properties
-All AST nodes inherit these properties:
-- `node_type`: NodeType enum
-- `source_location`: SourceLocation with file, line, column info
-- `get_source_code()` → str - Get the source code text
-- `get_children()` → List[ASTNode] - Get child nodes
-- `to_dict()` → Dict - Convert to JSON-serializable dict
+#### `find_literals(literal_types=None, contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find literals.
 
-### ContractDeclaration
-- `name`: str - Contract name
-- `kind`: str - "contract", "interface", "library", "abstract"
-- `inheritance`: List[str] - Inherited contract names
-- `functions`: List[FunctionDeclaration]
-- `variables`: List[VariableDeclaration]
-- `events`: List[EventDeclaration]
-- `modifiers`: List[ModifierDeclaration]
-- `structs`: List[StructDeclaration]
-- `enums`: List[EnumDeclaration]
-- `errors`: List[ErrorDeclaration]
+**Parameters:**
+- `literal_types`: Types of literals to find - `"string"`, `"number"`, `"bool"` (string or list)
+- `contract_name`: Name of contract to search in
+- `function_name`: Name of function to search in
+- `**filters`: Additional filter conditions
 
-**Methods:**
-- `is_interface()` → bool
-- `is_library()` → bool
-- `is_abstract()` → bool
-- `get_function(name)` → Optional[FunctionDeclaration]
+#### `find_identifiers(name_patterns=None, contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find identifiers.
 
-### FunctionDeclaration
-- `name`: str - Function name
-- `visibility`: Visibility enum
-- `state_mutability`: StateMutability enum
-- `is_constructor`: bool
-- `is_receive`: bool
-- `is_fallback`: bool
-- `is_virtual`: bool
-- `is_override`: bool
-- `parameters`: List[Parameter]
-- `return_parameters`: List[Parameter]
-- `modifiers`: List[str] - Applied modifier names
-- `body`: Optional[Block]
+**Parameters:**
+- `name_patterns`: Identifier name patterns to match (string, regex, or list)
+- `contract_name`: Name of contract to search in
+- `function_name`: Name of function to search in
+- `**filters`: Additional filter conditions
 
-**Analysis Properties:**
-- `has_external_calls`: bool
-- `has_asset_transfers`: bool
-- `external_call_targets`: List[str]
-- `asset_transfer_types`: List[str]
+#### `find_binary_operations(operators=None, contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find binary operations.
 
-**Methods:**
-- `get_signature()` → str
-- `is_external()` → bool
-- `is_public()` → bool
-- `is_internal()` → bool
-- `is_private()` → bool
-- `is_view()` → bool
-- `is_pure()` → bool
-- `is_payable()` → bool
+**Parameters:**
+- `operators`: Operators to match - `+`, `-`, `*`, `/`, `==`, `!=`, `<`, `>`, etc. (string or list)
+- `contract_name`: Name of contract to search in
+- `function_name`: Name of function to search in
+- `**filters`: Additional filter conditions
 
-### VariableDeclaration
-- `name`: str - Variable name
-- `type_name`: str - Variable type
-- `visibility`: Optional[Visibility] - For state variables
-- `is_constant`: bool
-- `is_immutable`: bool
-- `initial_value`: Optional[Expression]
+#### `find_unary_operations(operators=None, contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find unary operations.
 
-**Methods:**
-- `is_state_variable()` → bool
-- `get_all_references()` → List[VariableReference]
-- `get_reads()` → List[VariableReference]
-- `get_writes()` → List[VariableReference]
+**Parameters:**
+- `operators`: Operators to match - `!`, `-`, `+`, `++`, `--`, etc. (string or list)
+- `contract_name`: Name of contract to search in
+- `function_name`: Name of function to search in
+- `**filters`: Additional filter conditions
 
-### CallExpression
-- `function`: Expression - Function being called
-- `arguments`: List[Expression] - Call arguments
-- `call_type`: Optional[str] - Type of call
+### Enhanced Expression Finders
 
-**Methods:**
-- `get_call_type()` → Optional[CallType]
-- `is_external_call()` → bool
-- `is_internal_call()` → bool
-- `is_library_call()` → bool
-- `is_low_level_call()` → bool
-- `get_call_signature()` → Optional[str]
-- `get_call_info()` → CallMetadata
-- `get_call_args()` → List[Any]
-- `get_call_value()` → Optional[str]
-- `get_call_gas()` → Optional[str]
+#### `find_expressions_with_operator(operators: Union[str, List[str]], contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find expressions with specific operators.
 
-## Enums and Constants
+#### `find_expressions_with_value(value: Union[str, int, float], contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find literal expressions with specific values.
 
-### Visibility
+#### `find_expressions_accessing_member(member_name: str, contract_name=None, function_name=None, **filters) -> List[Expression]`
+Find expressions that access a specific member (e.g., 'balance', 'length').
+
+### Pattern-Based Discovery
+
+#### `find_by_pattern(pattern: Union[str, Pattern], **filters) -> List[ASTNode]`
+Find nodes matching a regex pattern in their source code.
+
+**Parameters:**
+- `pattern`: Regular expression pattern to match (string or compiled Pattern)
+- `**filters`: Additional filter conditions
+
+#### `find_by_custom_predicate(predicate: Callable[[ASTNode], bool], element_types=None, **filters) -> List[ASTNode]`
+Find nodes matching a custom predicate function.
+
+**Parameters:**
+- `predicate`: Function that takes an ASTNode and returns bool
+- `element_types`: Optional list of AST node types to filter by
+- `**filters`: Additional filter conditions
+
+#### `find_functions_with_source_pattern(pattern: Union[str, Pattern], contract_name=None, **filters) -> List[FunctionDeclaration]`
+Find functions containing specific patterns in their source code.
+
+#### `find_functions_with_time_operations(contract_name=None, **filters) -> List[FunctionDeclaration]`
+Find functions that contain time-related operations.
+
+#### `find_variables_time_related(contract_name=None, **filters) -> List[VariableDeclaration]`
+Find time-related variables.
+
+#### `find_statements_with_source_pattern(pattern: Union[str, Pattern], contract_name=None, function_name=None, **filters) -> List[Statement]`
+Find statements containing specific patterns in their source code.
+
+## Fluent Collection Properties
+
+### `contracts: ContractCollection`
+Entry point for fluent contract queries.
+
+### `functions: FunctionCollection`
+Entry point for fluent function queries.
+
+### `variables: VariableCollection`
+Entry point for fluent variable queries.
+
+### `modifiers: ModifierCollection`
+Entry point for fluent modifier queries.
+
+### `events: EventCollection`
+Entry point for fluent event queries.
+
+### `statements: StatementCollection`
+Entry point for fluent statement queries.
+
+### `expressions: ExpressionCollection`
+Entry point for fluent expression queries.
+
+## Reference Analysis
+
+#### `find_references_to(target: Union[str, ASTNode], **filters) -> List[ASTNode]`
+Find all references to a target symbol or node.
+
+**Parameters:**
+- `target`: Symbol name (string) or AST node to find references for
+- `**filters`: Additional filter conditions
+
+#### `find_callers_of(target: Union[str, FunctionDeclaration], depth=1, **filters) -> List[FunctionDeclaration]`
+Find functions that call the target function.
+
+**Parameters:**
+- `target`: Function name (string) or FunctionDeclaration to find callers for
+- `depth`: Search depth (currently only depth=1 is supported)
+- `**filters`: Additional filter conditions
+
+#### `find_callees_of(source: Union[str, FunctionDeclaration], depth=1, **filters) -> List[FunctionDeclaration]`
+Find functions called by the source function.
+
+**Parameters:**
+- `source`: Function name (string) or FunctionDeclaration to analyze
+- `depth`: Search depth (currently only depth=1 is supported)
+- `**filters`: Additional filter conditions
+
+#### `find_call_chains(from_element: Union[str, FunctionDeclaration], to_element: Union[str, FunctionDeclaration], max_depth=10) -> List[List[FunctionDeclaration]]`
+Find call chains from one function to another.
+
+**Parameters:**
+- `from_element`: Starting function (name or declaration)
+- `to_element`: Target function (name or declaration)
+- `max_depth`: Maximum chain depth to search (default: 10)
+
+#### `find_definitions_of(name: str, scope=None, **filters) -> List[ASTNode]`
+Find definitions of a symbol by name.
+
+#### `find_usages_of(element: Union[str, ASTNode], usage_types=None, **filters) -> List[ASTNode]`
+Find all usages of an element.
+
+#### `find_assignments_to(target: Union[str, ASTNode], **filters) -> List[ASTNode]`
+Find assignments to a target variable.
+
+#### `find_reads_of(target: Union[str, ASTNode], **filters) -> List[ASTNode]`
+Find read operations of a target variable.
+
+#### `find_modifications_of(target: Union[str, ASTNode], **filters) -> List[ASTNode]`
+Find modifications of a target variable.
+
+## Data Flow Analysis
+
+#### `trace_variable_flow(variable_name: str, direction='forward', function_name=None, contract_name=None, max_depth=5) -> List[Statement]`
+Trace how a variable flows through the code.
+
+**Parameters:**
+- `variable_name`: Name of the variable to trace
+- `direction`: Flow direction - `'forward'`, `'backward'`, or `'both'`
+- `function_name`: Optional function to limit analysis scope
+- `contract_name`: Optional contract to limit analysis scope
+- `max_depth`: Maximum analysis depth to prevent infinite loops (default: 5)
+
+#### `find_variable_influences(variable_name: str, function_name=None, contract_name=None, **filters) -> List[Statement]`
+Find all statements that influence a variable's value (backward flow).
+
+#### `find_variable_effects(variable_name: str, function_name=None, contract_name=None, **filters) -> List[Statement]`
+Find all statements affected by a variable's value (forward flow).
+
+#### `trace_flow_between_statements(from_pattern: str, to_pattern: str, function_name=None, contract_name=None, **filters) -> List[List[Statement]]`
+Find data flow paths between statement types.
+
+**Parameters:**
+- `from_pattern`: Pattern for source statements (e.g., `"require*"`, `"*.call(*)"`)
+- `to_pattern`: Pattern for target statements
+- `function_name`: Optional function to limit scope
+- `contract_name`: Optional contract to limit scope
+- `**filters`: Additional filter conditions
+
+#### `find_data_flow_paths(from_point: ASTNode, to_point: ASTNode) -> List[List[Statement]]`
+Find all data flow paths between two AST nodes.
+
+#### `get_variable_references_by_function(function: FunctionDeclaration) -> Dict[str, List]`
+Get all variable references within a function, organized by variable name.
+
+#### `get_data_flow_statistics() -> Dict[str, Any]`
+Get statistics about data flow analysis across the codebase.
+
+## Call Instruction Analysis
+
+#### `find_call_instructions(call_type=None, **filters) -> List[Expression]`
+Find call instructions, optionally filtered by call type.
+
+#### `find_external_call_instructions(**filters) -> List[Expression]`
+Find only external call instructions.
+
+#### `find_internal_call_instructions(visibility=None, **filters) -> List[Expression]`
+Find internal call instructions.
+
+**Parameters:**
+- `visibility`: Optional visibility filter - `"private"`, `"public"`, `"internal"`
+
+#### `find_delegate_call_instructions(**filters) -> List[Expression]`
+Find delegate call instructions.
+
+#### `find_library_call_instructions(**filters) -> List[Expression]`
+Find library call instructions.
+
+#### `find_low_level_call_instructions(**filters) -> List[Expression]`
+Find low-level call instructions (.call, .send, .transfer).
+
+#### `find_static_call_instructions(**filters) -> List[Expression]`
+Find static call instructions.
+
+#### `find_calls_with_callee_function_name(name: str, sensitivity=True, **filters) -> List[Expression]`
+Find calls to functions with specific name.
+
+**Parameters:**
+- `name`: Function name to match
+- `sensitivity`: Case-sensitive matching (default: True)
+
+#### `find_calls_with_callee_function_signature(signature: str, **filters) -> List[Expression]`
+Find calls with specific function signature.
+
+#### `find_calls_with_called_function_name_prefix(prefix: str, **filters) -> List[Expression]`
+Find calls to functions with names starting with prefix.
+
+## Import Analysis
+
+#### `import_analyzer()`
+Get an import analyzer instance for dependency analysis.
+
+#### `find_imports(pattern=None, **filters) -> List`
+Find import statements matching a pattern.
+
+**Parameters:**
+- `pattern`: Pattern to match import paths/symbols (supports wildcards)
+
+#### `find_contracts_using_imports(import_patterns: Union[str, List[str]], **filters)`
+Find contracts that use specific imports.
+
+#### `find_functions_calling_imported(import_patterns: Union[str, List[str]], **filters)`
+Find functions that call symbols from specific imports.
+
+## Set Operations
+
+#### `intersect(*element_sets) -> List[ASTNode]`
+Find intersection of multiple element sets.
+
+#### `union(*element_sets) -> List[ASTNode]`
+Find union of multiple element sets.
+
+#### `difference(base_set, subtract_set) -> List[ASTNode]`
+Find difference between two element sets.
+
+## Element Manipulation
+
+#### `filter_elements(elements, **filter_conditions) -> List[ASTNode]`
+Filter elements based on arbitrary conditions.
+
+#### `group_elements(elements, group_by_attribute: str) -> Dict[str, List[ASTNode]]`
+Group elements by a specific attribute.
+
+#### `sort_elements(elements, sort_by_attribute: str, reverse=False) -> List[ASTNode]`
+Sort elements by a specific attribute.
+
+## Context Analysis
+
+#### `find_containing_elements(element: ASTNode, container_types=None, **filters) -> List[ASTNode]`
+Find elements that contain the given element.
+
+#### `find_contained_elements(container: ASTNode, element_types=None, **filters) -> List[ASTNode]`
+Find elements contained within the given container.
+
+#### `find_sibling_elements(element: ASTNode, sibling_types=None, **filters) -> List[ASTNode]`
+Find sibling elements of the given element.
+
+#### `get_surrounding_context(element: ASTNode, context_radius=1, **filters) -> Dict[str, Any]`
+Get surrounding context for an element.
+
+## Pattern Matching
+
+#### `find_by_ast_pattern(pattern, **filters) -> List[ASTNode]`
+Find nodes matching an AST pattern.
+
+#### `find_elements_matching_all(conditions: List[Callable[[ASTNode], bool]], **filters) -> List[ASTNode]`
+Find elements that match ALL provided conditions.
+
+#### `find_elements_matching_any(conditions: List[Callable[[ASTNode], bool]], **filters) -> List[ASTNode]`
+Find elements that match ANY provided conditions.
+
+## Analysis and Metrics
+
+#### `extract_properties(elements: List[ASTNode], property_names: List[str]) -> List[Dict]`
+Extract specified properties from elements.
+
+#### `extract_conditions(conditional_elements: List[ASTNode]) -> List[Dict]`
+Extract conditions from conditional elements.
+
+#### `get_metrics(elements: List[ASTNode], metric_types=None) -> Dict[str, Any]`
+Get metrics for a collection of elements.
+
+#### `analyze_complexity(elements: List[ASTNode], metrics=None) -> Dict[str, Any]`
+Analyze complexity of elements.
+
+#### `get_statistics() -> Dict[str, Any]`
+Get comprehensive statistics about the loaded codebase.
+
+#### `get_contract_names() -> List[str]`
+Get names of all loaded contracts.
+
+## Quick Usage Examples
+
 ```python
-class Visibility(str, Enum):
-    PUBLIC = "public"
-    PRIVATE = "private"
-    INTERNAL = "internal"
-    EXTERNAL = "external"
+from sol_query import SolidityQueryEngine
+
+# Initialize
+engine = SolidityQueryEngine("path/to/contracts")
+
+# Find external functions
+external_funcs = engine.find_functions(visibility="external")
+
+# Security analysis
+risky_functions = (engine.functions
+                  .external()
+                  .payable()
+                  .with_external_calls())
+
+# Find delegate calls
+delegate_calls = engine.find_delegate_call_instructions()
+
+# Data flow analysis
+flow = engine.trace_variable_flow("balance", direction="both")
+
+# Pattern matching
+assembly = engine.find_by_pattern(r"assembly\s*\{")
 ```
-
-### StateMutability
-```python
-class StateMutability(str, Enum):
-    PURE = "pure"
-    VIEW = "view"
-    NONPAYABLE = "nonpayable"
-    PAYABLE = "payable"
-```
-
-### CallType
-```python
-class CallType(str, Enum):
-    # Function call types
-    EXTERNAL = "external"        # External contract calls
-    INTERNAL = "internal"        # Internal function calls
-    LIBRARY = "library"          # Library function calls
-    LOW_LEVEL = "low_level"      # Low-level calls (.call, .delegatecall, etc.)
-
-    # Visibility-based types
-    PUBLIC = "public"            # Public function calls
-    PRIVATE = "private"          # Private function calls
-
-    # Special call types
-    EVENT = "event"              # Event emissions (emit)
-    SOLIDITY = "solidity"        # Built-in Solidity functions
-
-    # Constructor and creation calls
-    NEW_ARR = "new_arr"          # Array creation
-    NEW_ELEMENTARY_TYPE = "new_elementary_type"
-    NEW_STRUCT = "new_struct"    # Struct creation
-    NEW_CONTRACT = "new_contract" # Contract creation
-
-    # Conversion and casting
-    TYPE_CONVERSION = "type_conversion"
-
-    # Assembly and special
-    ASSEMBLY = "assembly"        # Assembly block calls
-    DELEGATE = "delegate"        # Delegate calls specifically
-    STATIC = "static"           # Static calls specifically
-
-    UNKNOWN = "unknown"
-```
-
-### NodeType
-```python
-class NodeType(str, Enum):
-    # Declarations
-    CONTRACT = "contract"
-    FUNCTION = "function"
-    MODIFIER = "modifier"
-    VARIABLE = "variable"
-    STRUCT = "struct"
-    ENUM = "enum"
-    EVENT = "event"
-    ERROR = "error"
-    IMPORT = "import"
-
-    # Statements
-    IF_STATEMENT = "if_statement"
-    FOR_STATEMENT = "for_statement"
-    WHILE_STATEMENT = "while_statement"
-    DO_WHILE_STATEMENT = "do_while_statement"
-    RETURN_STATEMENT = "return_statement"
-    EMIT_STATEMENT = "emit_statement"
-    REQUIRE_STATEMENT = "require_statement"
-    ASSERT_STATEMENT = "assert_statement"
-    REVERT_STATEMENT = "revert_statement"
-    EXPRESSION_STATEMENT = "expression_statement"
-    BLOCK = "block"
-    STATEMENT = "statement"
-
-    # Expressions
-    CALL_EXPRESSION = "call_expression"
-    BINARY_EXPRESSION = "binary_expression"
-    UNARY_EXPRESSION = "unary_expression"
-    ASSIGNMENT_EXPRESSION = "assignment_expression"
-    TERNARY_EXPRESSION = "ternary_expression"
-    TUPLE_EXPRESSION = "tuple_expression"
-    TYPE_CAST_EXPRESSION = "type_cast_expression"
-    UPDATE_EXPRESSION = "update_expression"
-    META_TYPE_EXPRESSION = "meta_type_expression"
-    PAYABLE_CONVERSION = "payable_conversion_expression"
-    STRUCT_EXPRESSION = "struct_expression"
-    PARENTHESIZED_EXPRESSION = "parenthesized_expression"
-    ARRAY_ACCESS = "array_access"
-    SLICE_ACCESS = "slice_access"
-    INLINE_ARRAY_EXPRESSION = "inline_array_expression"
-    NEW_EXPRESSION = "new_expression"
-    USER_DEFINED_TYPE_EXPR = "user_defined_type_expr"
-    PRIMITIVE_TYPE_EXPR = "primitive_type_expr"
-    IDENTIFIER = "identifier"
-    LITERAL = "literal"
-    MEMBER_ACCESS = "member_access"
-    INDEX_ACCESS = "index_access"
-```
-
-## Advanced Features
-
-### Query Composition
-
-Combine queries using boolean logic:
-
-```python
-# AND operation (method chaining)
-results = engine.contracts.with_name("*Token*").functions.external().view()
-
-# Set operations
-external_funcs = engine.functions.external()
-payable_funcs = engine.functions.payable()
-
-# Union
-all_funcs = external_funcs.union(payable_funcs)
-
-# Intersection
-external_payable = external_funcs.intersect(payable_funcs)
-
-# Difference
-non_payable_external = external_funcs.subtract(payable_funcs)
-```
-
-### Filtering with Custom Predicates
-
-```python
-# Filter with lambda functions
-complex_functions = engine.functions.where(
-    lambda f: len(f.parameters) > 3 and f.is_payable()
-)
-
-# Negation filters
-non_view_functions = engine.functions.and_not(lambda f: f.is_view())
-```
-
-### Pattern Matching
-
-Supports wildcards and regex:
-- `*` - Match any characters
-- `?` - Match single character
-- `[abc]` - Match any of a, b, c
-- Regex patterns for complex matching
-
-### Data Flow Analysis
-
-```python
-# Trace variable data flow
-flow_path = engine.trace_variable_flow("amount", "transfer", "MyToken")
-
-# Find what influences a variable
-influences = engine.find_variable_influences("balance", "withdraw")
-
-# Find what a variable affects
-effects = engine.find_variable_effects("owner", "changeOwner")
-```
-
-### Import Analysis
-
-```python
-# Analyze import dependencies
-dependencies = engine.analyze_imports("*OpenZeppelin*")
-
-# Find usage of imported symbols
-usage = engine.find_import_usage("*SafeMath*")
-```
-
-### Serialization
-
-```python
-# Convert results to JSON
-from sol_query.utils.serialization import LLMSerializer, SerializationLevel
-
-serializer = LLMSerializer(SerializationLevel.DETAILED)
-json_data = serializer.serialize_collection(engine.contracts)
-```
-
-## Error Handling
-
-- `ParseError` - Raised for syntax/parsing errors
-- `FileNotFoundError` - Missing source files
-- Invalid patterns return empty collections
-- Type mismatches are gracefully handled
-
-## Performance Tips
-
-- Use specific patterns instead of broad wildcards
-- Filter early in query chains
-- Use `deep=False` for shallow analysis when possible
-- Cache engine instances for repeated queries
-- Use `get_statistics()` to monitor parsing performance

@@ -161,8 +161,8 @@ Sol-Query is built on a robust, extensible architecture:
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## 🔗 Links
+## 📚 Documentation
 
-- **[Complete API Documentation](docs/api-reference.md)**
-- **[Architecture Guide](docs/architecture.md)**
-- **[Documentation Hub](docs/README.md)**
+- **[Complete API Documentation](docs/api-reference.md)** - Full API reference with all methods
+- **[Architecture Guide](docs/architecture.md)** - Technical implementation details
+- **[Documentation Hub](docs/README.md)** - All documentation resources

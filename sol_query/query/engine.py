@@ -708,13 +708,54 @@ class SolidityQueryEngine:
     # Fluent collection access points (Glider-inspired)
     @property
     def contracts(self) -> ContractCollection:
-        """Entry point for fluent contract queries."""
+        """
+        Entry point for fluent contract queries.
+        
+        Provides access to all contracts through a fluent API that supports
+        method chaining for complex queries. This is the recommended approach
+        for building sophisticated contract discovery queries.
+        
+        Returns:
+            ContractCollection object supporting fluent query methods
+            
+        Examples:
+            >>> # Find ERC20 contracts with specific inheritance
+            >>> erc20s = engine.contracts.with_inheritance("ERC20").with_kind("contract")
+            >>> 
+            >>> # Chain multiple filters
+            >>> tokens = (engine.contracts
+            ...           .with_name_pattern("*Token*")
+            ...           .with_inheritance(["ERC20", "Ownable"]))
+        """
         contracts = self.source_manager.get_contracts()
         return ContractCollection(contracts, self)
 
     @property
     def functions(self) -> FunctionCollection:
-        """Entry point for fluent function queries."""
+        """
+        Entry point for fluent function queries.
+        
+        Provides access to all functions through a fluent API supporting
+        advanced filtering and analysis. Ideal for security analysis,
+        code quality assessment, and complex function discovery.
+        
+        Returns:
+            FunctionCollection object supporting fluent query methods
+            
+        Examples:
+            >>> # Find risky external functions
+            >>> risky = (engine.functions
+            ...           .external()
+            ...           .payable()
+            ...           .with_external_calls()
+            ...           .without_modifiers(["nonReentrant"]))
+            >>> 
+            >>> # Find view functions in specific contract
+            >>> views = (engine.functions
+            ...          .in_contract("MyContract")
+            ...          .view()
+            ...          .public_or_external())
+        """
         functions = self._get_all_functions()
         return FunctionCollection(functions, self)
 
@@ -750,7 +791,27 @@ class SolidityQueryEngine:
 
     # Advanced analysis methods
     def find_references_to(self, target: Union[str, ASTNode], **filters: Any) -> List[ASTNode]:
-        """Find all references to a target symbol or node."""
+        """
+        Find all references to a target symbol or node.
+        
+        This method searches for both identifier references and function calls
+        that reference the target symbol. It's useful for dependency analysis
+        and understanding symbol usage across the codebase.
+        
+        Args:
+            target: Symbol name (string) or AST node to find references for
+            **filters: Additional filter conditions (contract_name, function_name, etc.)
+            
+        Returns:
+            List of AST nodes that reference the target symbol
+            
+        Examples:
+            >>> # Find all references to 'totalSupply'
+            >>> refs = engine.find_references_to("totalSupply")
+            >>> 
+            >>> # Find references in specific contract
+            >>> refs = engine.find_references_to("balance", contract_name="ERC20")
+        """
         target_name = target if isinstance(target, str) else getattr(target, 'name', str(target))
 
         # Find all identifiers that match the target name
@@ -768,7 +829,29 @@ class SolidityQueryEngine:
 
     def find_callers_of(self, target: Union[str, FunctionDeclaration],
                        depth: int = 1, **filters: Any) -> List[FunctionDeclaration]:
-        """Find functions that call the target function."""
+        """
+        Find functions that call the target function.
+        
+        This method identifies all functions that contain calls to the specified
+        target function. It's essential for call graph analysis and understanding
+        function dependencies.
+        
+        Args:
+            target: Function name (string) or FunctionDeclaration to find callers for
+            depth: Search depth (currently only depth=1 is supported)
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of FunctionDeclaration objects that call the target function
+            
+        Examples:
+            >>> # Find all functions that call 'transfer'
+            >>> callers = engine.find_callers_of("transfer")
+            >>> 
+            >>> # Find callers of a specific function object
+            >>> transfer_func = engine.find_functions(name_patterns="transfer")[0]
+            >>> callers = engine.find_callers_of(transfer_func)
+        """
         target_name = target if isinstance(target, str) else target.name
 
         # Find all call expressions that target this function
@@ -797,7 +880,29 @@ class SolidityQueryEngine:
 
     def find_callees_of(self, source: Union[str, FunctionDeclaration],
                        depth: int = 1, **filters: Any) -> List[FunctionDeclaration]:
-        """Find functions called by the source function."""
+        """
+        Find functions called by the source function.
+        
+        This method identifies all functions that are called from within
+        the specified source function. It's useful for understanding
+        function call hierarchies and dependencies.
+        
+        Args:
+            source: Function name (string) or FunctionDeclaration to analyze
+            depth: Search depth (currently only depth=1 is supported)
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of FunctionDeclaration objects called by the source function
+            
+        Examples:
+            >>> # Find all functions called by 'mint'
+            >>> callees = engine.find_callees_of("mint")
+            >>> 
+            >>> # Find callees of a specific function object
+            >>> mint_func = engine.find_functions(name_patterns="mint")[0]
+            >>> callees = engine.find_callees_of(mint_func)
+        """
         source_name = source if isinstance(source, str) else source.name
 
         # Get the source function
@@ -844,13 +949,27 @@ class SolidityQueryEngine:
         """
         Find call chains from one function to another.
         
+        This method discovers all possible call paths between two functions,
+        which is essential for understanding complex control flows and
+        potential execution paths in smart contracts.
+        
         Args:
             from_element: Starting function (name or declaration)
             to_element: Target function (name or declaration)
-            max_depth: Maximum chain depth to search
+            max_depth: Maximum chain depth to search (default: 10)
             
         Returns:
-            List of call chains (each chain is a list of functions)
+            List of call chains, where each chain is a list of FunctionDeclaration
+            objects representing the call path from source to target
+            
+        Examples:
+            >>> # Find call chains from 'deposit' to 'transfer'
+            >>> chains = engine.find_call_chains("deposit", "transfer")
+            >>> for chain in chains:
+            ...     print(" -> ".join(f.name for f in chain))
+            >>> 
+            >>> # Limit search depth for performance
+            >>> chains = engine.find_call_chains("mint", "burn", max_depth=5)
         """
         from_name = from_element if isinstance(from_element, str) else from_element.name
         to_name = to_element if isinstance(to_element, str) else to_element.name
@@ -885,7 +1004,30 @@ class SolidityQueryEngine:
         return chains
 
     def find_by_pattern(self, pattern: Union[str, Pattern], **filters: Any) -> List[ASTNode]:
-        """Find nodes matching a regex pattern in their source code."""
+        """
+        Find nodes matching a regex pattern in their source code.
+        
+        This is a powerful method for finding code patterns that don't fit
+        into standard categories. It searches the actual source code text
+        of AST nodes using regular expressions.
+        
+        Args:
+            pattern: Regular expression pattern to match (string or compiled Pattern)
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of AST nodes whose source code matches the pattern
+            
+        Examples:
+            >>> # Find all assembly blocks
+            >>> asm_nodes = engine.find_by_pattern(r"assembly\s*\{")
+            >>> 
+            >>> # Find time-related operations
+            >>> time_ops = engine.find_by_pattern(r"block\.timestamp|now\b")
+            >>> 
+            >>> # Find unchecked arithmetic
+            >>> unchecked = engine.find_by_pattern(r"unchecked\s*\{")
+        """
         all_nodes = self._get_all_nodes()
         matching_nodes = []
 
@@ -898,7 +1040,35 @@ class SolidityQueryEngine:
     def find_by_custom_predicate(self, predicate: Callable[[ASTNode], bool],
                                 element_types: Optional[List[Type[ASTNode]]] = None,
                                 **filters: Any) -> List[ASTNode]:
-        """Find nodes matching a custom predicate function."""
+        """
+        Find nodes matching a custom predicate function.
+        
+        This method provides maximum flexibility for custom queries by allowing
+        you to define arbitrary conditions using Python functions. It's ideal
+        for complex analysis that doesn't fit standard query patterns.
+        
+        Args:
+            predicate: Function that takes an ASTNode and returns bool
+            element_types: Optional list of AST node types to filter by
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of AST nodes that satisfy the predicate function
+            
+        Examples:
+            >>> # Find functions with many parameters
+            >>> def many_params(node):
+            ...     return (isinstance(node, FunctionDeclaration) and 
+            ...             len(node.parameters) > 5)
+            >>> complex_funcs = engine.find_by_custom_predicate(many_params)
+            >>> 
+            >>> # Find functions with specific naming pattern and modifiers
+            >>> def special_funcs(node):
+            ...     return (isinstance(node, FunctionDeclaration) and
+            ...             node.name.startswith('_') and
+            ...             'internal' in [m.name for m in node.modifiers])
+            >>> internals = engine.find_by_custom_predicate(special_funcs)
+        """
         all_nodes = self._get_all_nodes()
 
         if element_types:
@@ -909,7 +1079,26 @@ class SolidityQueryEngine:
 
     # Statistics and metadata
     def get_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive statistics about the loaded codebase."""
+        """
+        Get comprehensive statistics about the loaded codebase.
+        
+        This method provides detailed metrics about the analyzed Solidity code,
+        including counts of various elements, contract types, and complexity measures.
+        Useful for code quality assessment and codebase overview.
+        
+        Returns:
+            Dictionary containing comprehensive codebase statistics including:
+            - Element counts (contracts, functions, variables, etc.)
+            - Contract type distribution
+            - File and line counts
+            - Other structural metrics
+            
+        Examples:
+            >>> stats = engine.get_statistics()
+            >>> print(f"Total contracts: {stats['total_contracts']}")
+            >>> print(f"Total functions: {stats['total_functions']}")
+            >>> print(f"Contract types: {stats['contracts_by_type']}")
+        """
         stats = self.source_manager.get_statistics()
 
         # Add element counts
@@ -930,7 +1119,22 @@ class SolidityQueryEngine:
         return stats
 
     def get_contract_names(self) -> List[str]:
-        """Get names of all loaded contracts."""
+        """
+        Get names of all loaded contracts.
+        
+        Returns a simple list of contract names from all loaded source files.
+        Useful for iterating over contracts or building contract selection UIs.
+        
+        Returns:
+            List of contract names as strings
+            
+        Examples:
+            >>> names = engine.get_contract_names()
+            >>> print("Available contracts:", names)
+            >>> for name in names:
+            ...     funcs = engine.find_functions(contract_name=name)
+            ...     print(f"{name}: {len(funcs)} functions")
+        """
         return [contract.name for contract in self.source_manager.get_contracts()]
 
     # Internal helper methods
@@ -1365,11 +1569,29 @@ class SolidityQueryEngine:
         """
         Find intersection of multiple element sets.
         
+        This utility method combines multiple query results to find elements
+        that appear in ALL provided sets. Essential for building complex
+        queries that require multiple conditions to be satisfied simultaneously.
+        
         Args:
-            *element_sets: Variable number of element lists/sets to intersect
+            *element_sets: Variable number of element lists/sets to intersect.
+                          Can be lists, collections, or individual elements.
             
         Returns:
-            List of elements present in all sets
+            List of elements present in all provided sets
+            
+        Examples:
+            >>> # Find functions that are both external and payable
+            >>> external = engine.find_functions(visibility=Visibility.EXTERNAL)
+            >>> payable = engine.find_functions(state_mutability=StateMutability.PAYABLE)
+            >>> external_payable = engine.intersect(external, payable)
+            >>> 
+            >>> # Combine multiple conditions
+            >>> risky = engine.intersect(
+            ...     engine.find_functions(with_external_calls=True),
+            ...     engine.find_functions(state_mutability=StateMutability.PAYABLE),
+            ...     engine.find_functions(visibility=Visibility.EXTERNAL)
+            ... )
         """
         if not element_sets:
             return []
@@ -1412,11 +1634,29 @@ class SolidityQueryEngine:
         """
         Find union of multiple element sets.
         
+        This utility method combines multiple query results to find elements
+        that appear in ANY of the provided sets. Useful for building queries
+        with OR logic where elements matching any condition should be included.
+        
         Args:
-            *element_sets: Variable number of element lists/sets to union
+            *element_sets: Variable number of element lists/sets to union.
+                          Can be lists, collections, or individual elements.
             
         Returns:
-            List of elements present in any set (no duplicates)
+            List of elements present in any set, with duplicates removed
+            
+        Examples:
+            >>> # Find all functions that are either external or payable
+            >>> external = engine.find_functions(visibility=Visibility.EXTERNAL)
+            >>> payable = engine.find_functions(state_mutability=StateMutability.PAYABLE)
+            >>> external_or_payable = engine.union(external, payable)
+            >>> 
+            >>> # Combine different search strategies
+            >>> all_transfers = engine.union(
+            ...     engine.find_functions(name_patterns="transfer*"),
+            ...     engine.find_functions(name_patterns="*Transfer*"),
+            ...     engine.find_functions_with_source_pattern(r"transfer\(")
+            ... )
         """
         if not element_sets:
             return []
@@ -1447,12 +1687,27 @@ class SolidityQueryEngine:
         """
         Find difference between two element sets.
         
+        This utility method removes elements from one set that appear in another,
+        effectively implementing set subtraction. Useful for exclusion filters
+        and negative conditions in queries.
+        
         Args:
-            base_set: The base set of elements
-            subtract_set: Elements to subtract from base set
+            base_set: The base set of elements to start with
+            subtract_set: Elements to remove from the base set
             
         Returns:
             List of elements in base_set but not in subtract_set
+            
+        Examples:
+            >>> # Find all functions except view functions
+            >>> all_funcs = engine.find_functions()
+            >>> view_funcs = engine.find_functions(state_mutability=StateMutability.VIEW)
+            >>> non_view = engine.difference(all_funcs, view_funcs)
+            >>> 
+            >>> # Exclude functions with specific modifiers
+            >>> all_external = engine.find_functions(visibility=Visibility.EXTERNAL)
+            >>> with_guards = engine.find_functions(modifiers=["nonReentrant", "onlyOwner"])
+            >>> unprotected = engine.difference(all_external, with_guards)
         """
         # Convert to lists
         base_elements = []
@@ -2028,7 +2283,36 @@ class SolidityQueryEngine:
                            function_name: Optional[str] = None,
                            contract_name: Optional[str] = None,
                            max_depth: int = 5) -> List[Statement]:
-        """Trace how a variable flows through the code."""
+        """
+        Trace how a variable flows through the code.
+        
+        This method performs data flow analysis to track how a variable's value
+        propagates through the code. Essential for security analysis, debugging,
+        and understanding data dependencies.
+        
+        Args:
+            variable_name: Name of the variable to trace
+            direction: Flow direction - 'forward' (what uses this var),
+                      'backward' (what affects this var), or 'both'
+            function_name: Optional function to limit analysis scope
+            contract_name: Optional contract to limit analysis scope  
+            max_depth: Maximum analysis depth to prevent infinite loops
+            
+        Returns:
+            List of Statement objects representing the data flow path
+            
+        Examples:
+            >>> # Trace forward flow of user input
+            >>> flow = engine.trace_variable_flow("userAmount", direction="forward")
+            >>> 
+            >>> # Trace what affects a balance variable
+            >>> influences = engine.trace_variable_flow("balance", direction="backward")
+            >>> 
+            >>> # Trace within specific function
+            >>> flow = engine.trace_variable_flow(
+            ...     "temp", direction="both", function_name="transfer"
+            ... )
+        """
         # Import here to avoid circular imports
         from sol_query.analysis.data_flow import DataFlowAnalyzer
 
@@ -2065,7 +2349,31 @@ class SolidityQueryEngine:
                                 function_name: Optional[str] = None,
                                 contract_name: Optional[str] = None,
                                 **filters) -> List[Statement]:
-        """Find all statements that influence a variable's value (backward flow)."""
+        """
+        Find all statements that influence a variable's value (backward flow).
+        
+        This method performs backward data flow analysis to identify all
+        statements that could affect the value of a specific variable.
+        Critical for security analysis and understanding data sources.
+        
+        Args:
+            variable_name: Name of the variable to analyze
+            function_name: Optional function to limit analysis scope
+            contract_name: Optional contract to limit analysis scope
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of Statement objects that influence the variable's value
+            
+        Examples:
+            >>> # Find what influences totalSupply
+            >>> influences = engine.find_variable_influences("totalSupply")
+            >>> 
+            >>> # Analyze user input sources
+            >>> sources = engine.find_variable_influences(
+            ...     "amount", function_name="withdraw"
+            ... )
+        """
         return self.trace_variable_flow(
             variable_name=variable_name,
             direction='backward',
@@ -2079,7 +2387,31 @@ class SolidityQueryEngine:
                              function_name: Optional[str] = None,
                              contract_name: Optional[str] = None,
                              **filters) -> List[Statement]:
-        """Find all statements affected by a variable's value (forward flow)."""
+        """
+        Find all statements affected by a variable's value (forward flow).
+        
+        This method performs forward data flow analysis to identify all
+        statements that are affected by changes to a specific variable.
+        Useful for impact analysis and understanding data usage.
+        
+        Args:
+            variable_name: Name of the variable to analyze
+            function_name: Optional function to limit analysis scope
+            contract_name: Optional contract to limit analysis scope
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of Statement objects affected by the variable's value
+            
+        Examples:
+            >>> # Find what's affected by balance changes
+            >>> effects = engine.find_variable_effects("balance")
+            >>> 
+            >>> # Analyze impact of user input
+            >>> impacts = engine.find_variable_effects(
+            ...     "userInput", function_name="processData"
+            ... )
+        """
         return self.trace_variable_flow(
             variable_name=variable_name,
             direction='forward',
@@ -2251,7 +2583,28 @@ class SolidityQueryEngine:
         return calls
 
     def find_external_call_instructions(self, **filters) -> List[Expression]:
-        """Find only external call instructions."""
+        """
+        Find only external call instructions.
+        
+        This method identifies calls to external contracts, which are critical
+        for security analysis as they represent potential attack vectors and
+        reentrancy risks. Includes various types of external calls.
+        
+        Args:
+            **filters: Additional filter conditions (contract_name, function_name, etc.)
+            
+        Returns:
+            List of Expression objects representing external call instructions
+            
+        Examples:
+            >>> # Find all external calls
+            >>> ext_calls = engine.find_external_call_instructions()
+            >>> 
+            >>> # Find external calls in specific function
+            >>> risky_calls = engine.find_external_call_instructions(
+            ...     function_name="withdraw"
+            ... )
+        """
         all_calls = self.find_calls(**filters)
         external_calls = []
 
@@ -2288,7 +2641,28 @@ class SolidityQueryEngine:
         return internal_calls
 
     def find_delegate_call_instructions(self, **filters) -> List[Expression]:
-        """Find delegate call instructions."""
+        """
+        Find delegate call instructions.
+        
+        Delegate calls are particularly dangerous as they execute code in the
+        context of the calling contract, potentially allowing for storage
+        manipulation and privilege escalation attacks.
+        
+        Args:
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of Expression objects representing delegate call instructions
+            
+        Examples:
+            >>> # Find all delegate calls (high security risk)
+            >>> delegate_calls = engine.find_delegate_call_instructions()
+            >>> 
+            >>> # Check for delegate calls in proxy contracts
+            >>> proxy_delegates = engine.find_delegate_call_instructions(
+            ...     contract_name="Proxy"
+            ... )
+        """
 
 
         all_calls = self.find_calls(**filters)
@@ -2316,7 +2690,29 @@ class SolidityQueryEngine:
         return library_calls
 
     def find_low_level_call_instructions(self, **filters) -> List[Expression]:
-        """Find low-level call instructions (.call, .send, .transfer)."""
+        """
+        Find low-level call instructions (.call, .send, .transfer).
+        
+        Low-level calls bypass Solidity's type safety and can be dangerous
+        if not handled properly. They're often used for ether transfers
+        and arbitrary contract interactions.
+        
+        Args:
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of Expression objects representing low-level call instructions
+            including .call, .send, .transfer, .delegatecall, .staticcall
+            
+        Examples:
+            >>> # Find all low-level calls
+            >>> low_level = engine.find_low_level_call_instructions()
+            >>> 
+            >>> # Find potentially unsafe ether transfers
+            >>> transfers = engine.find_low_level_call_instructions(
+            ...     function_name="sendEther"
+            ... )
+        """
 
 
         all_calls = self.find_calls(**filters)

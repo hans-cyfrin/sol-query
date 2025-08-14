@@ -671,7 +671,7 @@ class SolidityQueryEngine:
             if any(self.pattern_matcher.matches_name_pattern(var.name, pattern)
                    for pattern in time_name_patterns):
                 filtered.append(var)
-        return self._filter_variables(filtered, None, None, None, contract_name, **filters)
+        return self._filter_variables(filtered, None, None, None, **filters)
 
     def find_statements_with_source_pattern(self,
                                            pattern: Union[str, Pattern],

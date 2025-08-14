@@ -29,7 +29,7 @@ Initialize the query engine, optionally loading source files.
 - `find_errors(name_patterns=None, contract_name=None, **filters)` - Find error declarations
 
 **Function Finders:**
-- `find_functions(name_patterns=None, visibility=None, modifiers=None, state_mutability=None, contract_name=None, **filters)` - Find functions
+- `find_functions(name_patterns=None, visibility=None, modifiers=None, state_mutability=None, contract_name=None, with_external_calls=None, with_asset_transfers=None, with_external_calls_deep=None, with_asset_transfers_deep=None, **filters)` - Find functions
 - `find_modifiers(name_patterns=None, contract_name=None, **filters)` - Find modifiers
 
 **Variable Finders:**
@@ -61,6 +61,12 @@ Initialize the query engine, optionally loading source files.
 - `find_callers_of(target, depth=1, **filters)` - Find functions that call the target
 - `find_callees_of(source, depth=1, **filters)` - Find functions called by the source
 - `find_call_chains(from_element, to_element, max_depth=10)` - Find call chains between functions
+
+**External Call and Asset Transfer Analysis:**
+- Functions with external calls (shallow): Direct external contract calls
+- Functions with external calls (deep): External calls anywhere in call tree
+- Functions with asset transfers (shallow): Direct ETH sends or token transfers
+- Functions with asset transfers (deep): Asset transfers anywhere in call tree
 
 **Reference Tracking:**
 - `find_references_to(target, **filters)` - Find all references to a symbol
@@ -204,6 +210,18 @@ Collection of function declarations with fluent query methods.
 **Parent Contract Access:**
 - `get_parent_contract(function)` - Get the parent contract of a function
 - `from_contract(contract_name)` - Filter functions from a specific contract
+
+**External Call and Asset Transfer Filters:**
+- `with_external_calls()` - Functions that directly contain external calls
+- `without_external_calls()` - Functions that do NOT directly contain external calls
+- `with_asset_transfers()` - Functions that directly contain asset transfers (ETH send, token transfers)
+- `without_asset_transfers()` - Functions that do NOT directly contain asset transfers
+- `with_external_calls_deep()` - Functions whose call tree includes external calls (deep analysis)
+- `without_external_calls_deep()` - Functions whose call tree does NOT include external calls
+- `with_asset_transfers_deep()` - Functions whose call tree includes asset transfers (deep analysis)
+- `without_asset_transfers_deep()` - Functions whose call tree does NOT include asset transfers
+- `with_external_call_targets(targets)` - Functions that call specific external targets
+- `with_asset_transfer_types(types)` - Functions that perform specific types of asset transfers
 
 ### VariableCollection
 

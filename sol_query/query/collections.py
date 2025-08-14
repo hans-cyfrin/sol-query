@@ -377,6 +377,107 @@ class FunctionCollection(BaseCollection):
                    if f.parent_contract and f.parent_contract.name == contract_name]
         return self._create_new_collection(filtered)
 
+    # External call and asset transfer filters
+    def with_external_calls(self) -> "FunctionCollection":
+        """Filter functions that directly contain external calls."""
+        filtered = [f for f in self._elements if f.has_external_calls]
+        return self._create_new_collection(filtered)
+
+    def without_external_calls(self) -> "FunctionCollection":
+        """Filter functions that do NOT directly contain external calls."""
+        filtered = [f for f in self._elements if not f.has_external_calls]
+        return self._create_new_collection(filtered)
+
+    def with_asset_transfers(self) -> "FunctionCollection":
+        """Filter functions that directly contain asset transfers (ETH send, token transfers)."""
+        filtered = [f for f in self._elements if f.has_asset_transfers]
+        return self._create_new_collection(filtered)
+
+    def without_asset_transfers(self) -> "FunctionCollection":
+        """Filter functions that do NOT directly contain asset transfers."""
+        filtered = [f for f in self._elements if not f.has_asset_transfers]
+        return self._create_new_collection(filtered)
+
+    def with_external_calls_deep(self) -> "FunctionCollection":
+        """
+        Filter functions whose call tree includes any external calls (deep analysis).
+        This analyzes the entire call chain to find functions that may indirectly make external calls.
+        """
+        from sol_query.analysis.call_analyzer import CallAnalyzer
+        analyzer = CallAnalyzer()
+        all_functions = self._engine._get_all_functions()
+
+        filtered = []
+        for func in self._elements:
+            if analyzer.analyze_call_tree_external_calls(func, all_functions):
+                filtered.append(func)
+
+        return self._create_new_collection(filtered)
+
+    def without_external_calls_deep(self) -> "FunctionCollection":
+        """
+        Filter functions whose call tree does NOT include any external calls (deep analysis).
+        """
+        from sol_query.analysis.call_analyzer import CallAnalyzer
+        analyzer = CallAnalyzer()
+        all_functions = self._engine._get_all_functions()
+
+        filtered = []
+        for func in self._elements:
+            if not analyzer.analyze_call_tree_external_calls(func, all_functions):
+                filtered.append(func)
+
+        return self._create_new_collection(filtered)
+
+    def with_asset_transfers_deep(self) -> "FunctionCollection":
+        """
+        Filter functions whose call tree includes any asset transfers (deep analysis).
+        This analyzes the entire call chain to find functions that may indirectly transfer assets.
+        """
+        from sol_query.analysis.call_analyzer import CallAnalyzer
+        analyzer = CallAnalyzer()
+        all_functions = self._engine._get_all_functions()
+
+        filtered = []
+        for func in self._elements:
+            if analyzer.analyze_call_tree_asset_transfers(func, all_functions):
+                filtered.append(func)
+
+        return self._create_new_collection(filtered)
+
+    def without_asset_transfers_deep(self) -> "FunctionCollection":
+        """
+        Filter functions whose call tree does NOT include any asset transfers (deep analysis).
+        """
+        from sol_query.analysis.call_analyzer import CallAnalyzer
+        analyzer = CallAnalyzer()
+        all_functions = self._engine._get_all_functions()
+
+        filtered = []
+        for func in self._elements:
+            if not analyzer.analyze_call_tree_asset_transfers(func, all_functions):
+                filtered.append(func)
+
+        return self._create_new_collection(filtered)
+
+    def with_external_call_targets(self, targets: Union[str, List[str]]) -> "FunctionCollection":
+        """Filter functions that call specific external targets."""
+        target_list = [targets] if isinstance(targets, str) else targets
+        filtered = []
+        for func in self._elements:
+            if any(target in func.external_call_targets for target in target_list):
+                filtered.append(func)
+        return self._create_new_collection(filtered)
+
+    def with_asset_transfer_types(self, transfer_types: Union[str, List[str]]) -> "FunctionCollection":
+        """Filter functions that perform specific types of asset transfers."""
+        type_list = [transfer_types] if isinstance(transfer_types, str) else transfer_types
+        filtered = []
+        for func in self._elements:
+            if any(transfer_type in func.asset_transfer_types for transfer_type in type_list):
+                filtered.append(func)
+        return self._create_new_collection(filtered)
+
 
 class VariableCollection(BaseCollection):
     """Collection of variable declarations with fluent query methods."""

@@ -215,6 +215,24 @@ class FunctionDeclaration(ASTNode):
         description="Function body (None for interface functions)"
     )
 
+    # Analysis metadata - populated during AST building
+    has_external_calls: bool = Field(
+        default=False,
+        description="Whether function directly contains external calls"
+    )
+    has_asset_transfers: bool = Field(
+        default=False,
+        description="Whether function directly contains asset transfers (ETH send, token transfers)"
+    )
+    external_call_targets: List[str] = Field(
+        default_factory=list,
+        description="List of external call targets detected in this function"
+    )
+    asset_transfer_types: List[str] = Field(
+        default_factory=list,
+        description="List of asset transfer types detected in this function"
+    )
+
     def get_signature(self) -> str:
         """Get function signature."""
         param_types = [p.type_name for p in self.parameters]

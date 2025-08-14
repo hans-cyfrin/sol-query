@@ -16,6 +16,7 @@ from sol_query.core.ast_nodes import (
 )
 from sol_query.core.parser import SolidityParser
 from sol_query.models.source_location import SourceLocation
+from sol_query.analysis.call_analyzer import CallAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class ASTBuilder:
         self.parser = parser
         self.source_code = source_code
         self.file_path = file_path
+        self.call_analyzer = CallAnalyzer()
 
         # Mapping of tree-sitter node types to our AST node types
         self.node_type_mapping = {
@@ -300,7 +302,7 @@ class ASTBuilder:
             if isinstance(body_ast, Block):
                 body = body_ast
 
-        return FunctionDeclaration(
+        function = FunctionDeclaration(
             source_location=self._get_source_location(node),
             raw_node=node,
             name=name,
@@ -316,6 +318,11 @@ class ASTBuilder:
             modifiers=modifiers,
             body=body
         )
+
+        # Analyze function for external calls and asset transfers
+        self.call_analyzer.analyze_function(function)
+
+        return function
 
     def _build_variable(self, node: tree_sitter.Node) -> VariableDeclaration:
         """Build a variable declaration."""

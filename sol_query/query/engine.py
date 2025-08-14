@@ -85,6 +85,10 @@ class SolidityQueryEngine:
                       modifiers: Optional[Union[str, List[str]]] = None,
                       state_mutability: Optional[Union[StateMutability, List[StateMutability]]] = None,
                       contract_name: Optional[str] = None,
+                      with_external_calls: Optional[bool] = None,
+                      with_asset_transfers: Optional[bool] = None,
+                      with_external_calls_deep: Optional[bool] = None,
+                      with_asset_transfers_deep: Optional[bool] = None,
                       **filters: Any) -> List[FunctionDeclaration]:
         """
         Find functions matching the specified criteria.
@@ -95,6 +99,10 @@ class SolidityQueryEngine:
             modifiers: Modifier names that must be present
             state_mutability: State mutability (pure, view, payable, nonpayable)
             contract_name: Name of contract containing the function
+            with_external_calls: Filter by functions with direct external calls
+            with_asset_transfers: Filter by functions with direct asset transfers
+            with_external_calls_deep: Filter by functions with external calls in call tree
+            with_asset_transfers_deep: Filter by functions with asset transfers in call tree
             **filters: Additional filter conditions
             
         Returns:
@@ -102,7 +110,8 @@ class SolidityQueryEngine:
         """
         functions = self._get_all_functions(contract_name)
         return self._filter_functions(functions, name_patterns, visibility, modifiers,
-                                    state_mutability, **filters)
+                                    state_mutability, with_external_calls, with_asset_transfers,
+                                    with_external_calls_deep, with_asset_transfers_deep, **filters)
 
     def find_variables(self,
                       name_patterns: Optional[Union[str, List[str], Pattern]] = None,
@@ -828,6 +837,10 @@ class SolidityQueryEngine:
                          visibility: Optional[Union[Visibility, List[Visibility]]] = None,
                          modifiers: Optional[Union[str, List[str]]] = None,
                          state_mutability: Optional[Union[StateMutability, List[StateMutability]]] = None,
+                         with_external_calls: Optional[bool] = None,
+                         with_asset_transfers: Optional[bool] = None,
+                         with_external_calls_deep: Optional[bool] = None,
+                         with_asset_transfers_deep: Optional[bool] = None,
                          **filters: Any) -> List[FunctionDeclaration]:
         """Filter functions based on criteria."""
         result = functions
@@ -849,6 +862,38 @@ class SolidityQueryEngine:
             modifier_list = [modifiers] if isinstance(modifiers, str) else modifiers
             result = [f for f in result
                      if any(mod in f.modifiers for mod in modifier_list)]
+
+        # Filter by external calls (shallow)
+        if with_external_calls is not None:
+            result = [f for f in result if f.has_external_calls == with_external_calls]
+
+        # Filter by asset transfers (shallow)
+        if with_asset_transfers is not None:
+            result = [f for f in result if f.has_asset_transfers == with_asset_transfers]
+
+        # Filter by external calls (deep)
+        if with_external_calls_deep is not None:
+            from sol_query.analysis.call_analyzer import CallAnalyzer
+            analyzer = CallAnalyzer()
+            all_functions = self._get_all_functions()
+            filtered = []
+            for func in result:
+                has_deep_external_calls = analyzer.analyze_call_tree_external_calls(func, all_functions)
+                if has_deep_external_calls == with_external_calls_deep:
+                    filtered.append(func)
+            result = filtered
+
+        # Filter by asset transfers (deep)
+        if with_asset_transfers_deep is not None:
+            from sol_query.analysis.call_analyzer import CallAnalyzer
+            analyzer = CallAnalyzer()
+            all_functions = self._get_all_functions()
+            filtered = []
+            for func in result:
+                has_deep_asset_transfers = analyzer.analyze_call_tree_asset_transfers(func, all_functions)
+                if has_deep_asset_transfers == with_asset_transfers_deep:
+                    filtered.append(func)
+            result = filtered
 
         return result
 

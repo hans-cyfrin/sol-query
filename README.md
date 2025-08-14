@@ -27,6 +27,9 @@ A comprehensive Python-based query engine for Solidity smart contracts that prov
 - **Variable Inspection**: Search state variables, locals, constants, and immutables
 - **Event & Error Tracking**: Locate events and custom errors with parameter analysis
 - **Modifier Detection**: Find and analyze function modifiers
+- **External Call Detection**: Identify functions making external contract calls
+- **Asset Transfer Analysis**: Find ETH sends, token transfers, and asset movements
+- **Deep Call Tree Analysis**: Trace external calls and transfers through function chains
 
 ### Advanced Pattern Matching
 - **Wildcard Support**: `"transfer*"` matches `transfer`, `transferFrom`, `transferOwnership`
@@ -86,6 +89,11 @@ view_functions = engine.functions.view().public()
 # Chain multiple filters
 payable_external = engine.functions.external().payable()
 owner_functions = engine.functions.with_modifiers("onlyOwner")
+
+# External call and asset transfer analysis
+functions_with_external_calls = engine.functions.with_external_calls()
+functions_with_asset_transfers = engine.functions.with_asset_transfers()
+deep_external_calls = engine.functions.with_external_calls_deep()
 
 # Navigation
 token_functions = engine.contracts.with_name("Token").get_functions()

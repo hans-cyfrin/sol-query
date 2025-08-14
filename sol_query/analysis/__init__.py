@@ -1,0 +1,1 @@
+"""Analysis infrastructure for scope, flow, and reference tracking."""

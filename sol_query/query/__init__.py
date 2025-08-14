@@ -1,0 +1,1 @@
+"""Unified query interface supporting both traditional and fluent styles."""

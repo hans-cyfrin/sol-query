@@ -1,0 +1,3 @@
+[submodule "sol-bug-bench"]
+	path = tests/fixtures/sol-bug-bench
+	url = https://github.com/hans-cyfrin/sol-bug-bench

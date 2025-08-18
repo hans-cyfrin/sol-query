@@ -1195,6 +1195,70 @@ class SolidityQueryEngine:
                 nodes.extend(source_file.ast)
         return nodes
 
+    def _find_containing_function(self, node: Any) -> Optional[str]:
+        """Find the name of the function containing this node."""
+        # For nodes that already have parent_function reference
+        if hasattr(node, 'parent_function') and node.parent_function:
+            return node.parent_function.name
+
+        # Simple heuristic: check if the node's source location is within a function's range
+        # This is a basic implementation - a full implementation would traverse the AST
+        if hasattr(node, 'source_location') and node.source_location:
+            # Get all functions and check if this node falls within any function's range
+            try:
+                all_functions = self._get_all_functions()
+                for func in all_functions:
+                    if (hasattr(func, 'source_location') and func.source_location and
+                        func.source_location.start_byte <= node.source_location.start_byte <= func.source_location.end_byte):
+                        return func.name
+            except:
+                # If anything goes wrong with the heuristic, just return None
+                pass
+
+        return None
+
+    def _apply_generic_filters(self, items: List[Any], **filters: Any) -> List[Any]:
+        """Apply generic filters to any list of AST nodes."""
+        if not filters:
+            return items
+
+        result = items
+
+        # Apply contract_name filter (for nodes with parent_contract)
+        if 'contract_name' in filters:
+            contract_name = filters['contract_name']
+            result = [item for item in result
+                     if (hasattr(item, 'parent_contract') and
+                         item.parent_contract and
+                         item.parent_contract.name == contract_name)]
+
+        # Apply function_name filter (for statements/expressions in specific functions)
+        if 'function_name' in filters:
+            function_name = filters['function_name']
+            # For now, this is a basic implementation
+            # A full implementation would require proper AST traversal
+            filtered_result = []
+            for item in result:
+                containing_func = self._find_containing_function(item)
+                if containing_func == function_name:
+                    filtered_result.append(item)
+            result = filtered_result
+
+        # Apply visibility filter (only if items have visibility attribute)
+        if 'visibility' in filters and result and hasattr(result[0], 'visibility'):
+            visibility = filters['visibility']
+            visibility_list = [visibility] if not isinstance(visibility, list) else visibility
+            result = [item for item in result if hasattr(item, 'visibility') and item.visibility in visibility_list]
+
+        # Apply node_type filter
+        if 'node_type' in filters:
+            node_type = filters['node_type']
+            node_types = [node_type] if isinstance(node_type, str) else node_type
+            result = [item for item in result
+                     if hasattr(item, 'node_type') and item.node_type.value in node_types]
+
+        return result
+
     def _filter_contracts(self, contracts: List[ContractDeclaration],
                          name_patterns: Optional[Union[str, List[str], Pattern]] = None,
                          inheritance: Optional[Union[str, List[str]]] = None,
@@ -1214,6 +1278,9 @@ class SolidityQueryEngine:
 
         if kind:
             result = [c for c in result if c.kind == kind]
+
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
 
         return result
 
@@ -1282,6 +1349,9 @@ class SolidityQueryEngine:
                     filtered.append(func)
             result = filtered
 
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
+
         return result
 
     def _filter_variables(self, variables: List[VariableDeclaration],
@@ -1305,6 +1375,9 @@ class SolidityQueryEngine:
             result = [v for v in result
                      if v.visibility and v.visibility in visibility_list]
 
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
+
         return result
 
     def _filter_modifiers(self, modifiers: List[ModifierDeclaration],
@@ -1317,6 +1390,9 @@ class SolidityQueryEngine:
             result = [m for m in result
                      if self.pattern_matcher.matches_name_pattern(m.name, name_patterns)]
 
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
+
         return result
 
     def _filter_events(self, events: List[EventDeclaration],
@@ -1328,6 +1404,9 @@ class SolidityQueryEngine:
         if name_patterns:
             result = [e for e in result
                      if self.pattern_matcher.matches_name_pattern(e.name, name_patterns)]
+
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
 
         return result
 
@@ -1464,6 +1543,9 @@ class SolidityQueryEngine:
             result = [s for s in result
                      if self.pattern_matcher.matches_name_pattern(s.name, name_patterns)]
 
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
+
         return result
 
     def _filter_enums(self, enums: List[EnumDeclaration],
@@ -1476,6 +1558,9 @@ class SolidityQueryEngine:
             result = [e for e in result
                      if self.pattern_matcher.matches_name_pattern(e.name, name_patterns)]
 
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
+
         return result
 
     def _filter_errors(self, errors: List[ErrorDeclaration],
@@ -1487,6 +1572,9 @@ class SolidityQueryEngine:
         if name_patterns:
             result = [e for e in result
                      if self.pattern_matcher.matches_name_pattern(e.name, name_patterns)]
+
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
 
         return result
 
@@ -1501,6 +1589,9 @@ class SolidityQueryEngine:
             result = [s for s in result
                      if hasattr(s, 'node_type') and s.node_type.value in type_list]
 
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
+
         return result
 
     def _filter_expressions(self, expressions: List[Expression],
@@ -1513,6 +1604,9 @@ class SolidityQueryEngine:
             type_list = [expression_types] if isinstance(expression_types, str) else expression_types
             result = [e for e in result
                      if hasattr(e, 'node_type') and e.node_type.value in type_list]
+
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
 
         return result
 
@@ -1527,6 +1621,9 @@ class SolidityQueryEngine:
                      if hasattr(c, 'function') and hasattr(c.function, 'name') and
                      self.pattern_matcher.matches_name_pattern(c.function.name, target_patterns)]
 
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
+
         return result
 
     def _filter_literals(self, literals: List,
@@ -1540,6 +1637,9 @@ class SolidityQueryEngine:
             result = [l for l in result
                      if hasattr(l, 'literal_type') and l.literal_type in type_list]
 
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
+
         return result
 
     def _filter_identifiers(self, identifiers: List,
@@ -1552,6 +1652,9 @@ class SolidityQueryEngine:
             result = [i for i in result
                      if hasattr(i, 'name') and
                      self.pattern_matcher.matches_name_pattern(i.name, name_patterns)]
+
+        # Apply generic filters
+        result = self._apply_generic_filters(result, **filters)
 
         return result
 

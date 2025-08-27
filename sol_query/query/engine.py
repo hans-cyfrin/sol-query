@@ -2890,6 +2890,40 @@ class SolidityQueryEngine:
 
         return filtered_calls
 
+    # ===== PRAGMA ANALYSIS METHODS =====
+
+    def find_pragmas(self,
+                    pragma_type: Optional[str] = None,
+                    pragma_value: Optional[str] = None,
+                    **filters: Any) -> List["PragmaDirective"]:
+        """
+        Find pragma directives matching the specified criteria.
+        
+        Args:
+            pragma_type: Type of pragma (e.g., 'solidity')
+            pragma_value: Value of the pragma (e.g., '^0.8.0')
+            **filters: Additional filter conditions
+            
+        Returns:
+            List of matching pragma directives
+        """
+        pragmas = []
+        for source_file in self.source_manager.files.values():
+            pragmas.extend(source_file.pragmas)
+
+        # Filter by pragma type
+        if pragma_type:
+            pragmas = [p for p in pragmas if p.pragma_type == pragma_type]
+
+        # Filter by pragma value
+        if pragma_value:
+            pragmas = [p for p in pragmas if pragma_value in p.pragma_value]
+
+        # Apply generic filters
+        pragmas = self._apply_generic_filters(pragmas, **filters)
+
+        return pragmas
+
     # ===== IMPORT ANALYSIS METHODS =====
 
     def import_analyzer(self):

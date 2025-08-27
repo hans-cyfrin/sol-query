@@ -41,6 +41,7 @@ class ASTBuilder:
         # Mapping of tree-sitter node types to our AST node types
         self.node_type_mapping = {
             "import_directive": self._build_import,
+            "pragma_directive": self._build_pragma_directive,  # Added pragma support
             "contract_declaration": self._build_contract,
             "interface_declaration": self._build_contract,
             "library_declaration": self._build_contract,
@@ -53,6 +54,9 @@ class ASTBuilder:
             "error_definition": self._build_error,
             "error_declaration": self._build_error,  # Added this mapping
             "struct_definition": self._build_struct,
+            "struct_declaration": self._build_struct,  # Handle both variants
+            "struct_member": self._build_struct_member,  # Added struct member support
+            "struct_field_assignment": self._build_struct_field_assignment,  # Added struct field assignment support
             "enum_definition": self._build_enum,
             "parameter": self._build_parameter,
             "error_parameter": self._build_parameter,  # Added this mapping
@@ -62,6 +66,7 @@ class ASTBuilder:
             "statement": self._build_statement,
             "return_statement": self._build_return,
             "expression_statement": self._build_expression_statement,
+            "emit_statement": self._build_emit_statement,  # Added emit statement support
             "variable_declaration_statement": self._build_variable_declaration_statement,
             "if_statement": self._build_if_statement,
             "for_statement": self._build_for_statement,
@@ -92,7 +97,16 @@ class ASTBuilder:
             "new_expression": self._build_new_expression,
             "user_defined_type": self._build_user_defined_type_expr,
             "primitive_type": self._build_primitive_type_expr,
+            "type_name": self._build_type_name,  # Added type name support
             "expression": self._build_expression,  # Handle generic expression nodes
+            # Handle ignorable nodes gracefully
+            "comment": self._build_comment,  # Skip comments
+            "{": self._build_ignorable,  # Skip punctuation
+            "}": self._build_ignorable,
+            ";": self._build_ignorable,
+            "[": self._build_ignorable,
+            "]": self._build_ignorable,
+            "^": self._build_ignorable,
         }
 
     def build_ast(self, tree: tree_sitter.Tree) -> List[ASTNode]:
@@ -146,6 +160,14 @@ class ASTBuilder:
 
         # For unsupported node types, try to find supported children
         logger.debug(f"Unsupported node type: {node_type}")
+        return None
+
+    def _build_comment(self, node: tree_sitter.Node) -> None:
+        """Build a comment node - just skip it."""
+        return None
+
+    def _build_ignorable(self, node: tree_sitter.Node) -> None:
+        """Build an ignorable node (punctuation, etc.) - just skip it."""
         return None
 
     def _get_source_location(self, node: tree_sitter.Node) -> SourceLocation:
@@ -480,6 +502,9 @@ class ASTBuilder:
 
     def _build_struct(self, node: tree_sitter.Node) -> StructDeclaration:
         """Build a struct declaration."""
+        # Import here to avoid circular imports
+        from sol_query.core.ast_nodes import StructMember
+
         # Get struct name
         name_node = self._find_child_by_type(node, "identifier")
         name = self._get_node_text(name_node) if name_node else "unknown"
@@ -490,7 +515,7 @@ class ASTBuilder:
         if body_node:
             for member_node in self._find_children_by_type(body_node, "struct_member"):
                 member = self.build_node(member_node)
-                if member and isinstance(member, VariableDeclaration):
+                if member and isinstance(member, StructMember):
                     members.append(member)
 
         return StructDeclaration(
@@ -499,6 +524,61 @@ class ASTBuilder:
             name=name,
             fields=members
         )
+
+    def _build_struct_member(self, node: tree_sitter.Node) -> "StructMember":
+        """Build a struct member."""
+        # Import here to avoid circular imports
+        from sol_query.core.ast_nodes import StructMember
+
+        name = ""
+        type_name = ""
+        storage_location = None
+
+        # Extract member information from children
+        for child in node.children:
+            if child.type == "identifier":
+                name = self._get_node_text(child)
+            elif child.type == "type_name":
+                type_name = self._get_node_text(child)
+            elif child.type in ["memory", "storage", "calldata"]:
+                storage_location = child.type
+
+        return StructMember(
+            source_location=self._get_source_location(node),
+            raw_node=node,
+            name=name,
+            type_name=type_name,
+            storage_location=storage_location
+        )
+
+    def _build_struct_field_assignment(self, node: tree_sitter.Node) -> "Expression":
+        """Build a struct field assignment."""
+        # Import here to avoid circular imports
+        from sol_query.core.ast_nodes import Expression, Identifier, Literal
+
+        # For now, treat struct field assignments as generic expressions
+        # This could be enhanced to create a more specific AST node type
+        field_name = ""
+        field_value = None
+
+        for child in node.children:
+            if child.type == "identifier":
+                field_name = self._get_node_text(child)
+            elif child.type not in [":", "comment"]:
+                field_value = self.build_node(child)
+                if field_value:
+                    break
+
+        # Create a simple expression representation
+        if field_value and isinstance(field_value, Expression):
+            return field_value
+        else:
+            # Fallback to identifier if no value found
+            return Identifier(
+                source_location=self._get_source_location(node),
+                raw_node=node,
+                name=field_name
+            )
 
     def _build_enum(self, node: tree_sitter.Node) -> EnumDeclaration:
         """Build an enum declaration."""
@@ -574,6 +654,25 @@ class ASTBuilder:
             source_location=self._get_source_location(node),
             raw_node=node,
             expression=expression
+        )
+
+    def _build_emit_statement(self, node: tree_sitter.Node) -> "EmitStatement":
+        """Build an emit statement."""
+        # Import here to avoid circular imports
+        from sol_query.core.ast_nodes import EmitStatement
+
+        event_call = None
+        for child in node.children:
+            if child.type != "emit" and child.type != ";":
+                expr = self.build_node(child)
+                if expr and isinstance(expr, Expression):
+                    event_call = expr
+                    break
+
+        return EmitStatement(
+            source_location=self._get_source_location(node),
+            raw_node=node,
+            event_call=event_call
         )
 
     def _build_identifier(self, node: tree_sitter.Node) -> Identifier:
@@ -861,16 +960,16 @@ class ASTBuilder:
         left = None
         right = None
         operator = "="
-        
+
         # Find left and right operands
         children = [child for child in node.children if child.type not in ["=", ";"]]
         if len(children) >= 2:
             left_node = children[0]
             right_node = children[1]
-            
+
             left = self.build_node(left_node)
             right = self.build_node(right_node)
-        
+
         # If we couldn't parse properly, fallback to identifiers
         if not isinstance(left, Expression):
             left = Identifier(
@@ -882,7 +981,7 @@ class ASTBuilder:
                 source_location=self._get_source_location(node),
                 name="unknown_right"
             )
-        
+
         return BinaryExpression(
             source_location=self._get_source_location(node),
             raw_node=node,
@@ -1177,6 +1276,31 @@ class ASTBuilder:
                 return child.text.decode('utf-8')
         return None
 
+    def _build_pragma_directive(self, node: tree_sitter.Node) -> "PragmaDirective":
+        """Build a pragma directive."""
+        # Import here to avoid circular imports
+        from sol_query.core.ast_nodes import PragmaDirective
+
+        # For now, use a simple text-based approach since the tree-sitter structure is complex
+        full_text = self._get_node_text(node)
+
+        # Extract pragma type and value from the full text
+        if "pragma solidity" in full_text:
+            pragma_type = "solidity"
+            # Extract the version part (everything after "pragma solidity" and before ";")
+            pragma_value = full_text.replace("pragma solidity", "").strip().rstrip(";")
+        else:
+            # Fallback for other pragma types
+            pragma_type = "unknown"
+            pragma_value = full_text.replace("pragma", "").strip().rstrip(";")
+
+        return PragmaDirective(
+            source_location=self._get_source_location(node),
+            raw_node=node,
+            pragma_type=pragma_type,
+            pragma_value=pragma_value
+        )
+
     def _build_new_expression(self, node: tree_sitter.Node) -> Expression:
         """Build a new expression."""
         type_name = "unknown_type"
@@ -1218,4 +1342,19 @@ class ASTBuilder:
             node_type=NodeType.PRIMITIVE_TYPE_EXPR,
             value=text if text else "primitive_type",
             literal_type="primitive_type"
+        )
+
+    def _build_type_name(self, node: tree_sitter.Node) -> "Expression":
+        """Build a type name expression."""
+        # Import here to avoid circular imports
+        from sol_query.core.ast_nodes import Expression, Identifier
+
+        # Extract the type name text
+        type_text = self._get_node_text(node)
+
+        # Create an identifier representing the type
+        return Identifier(
+            source_location=self._get_source_location(node),
+            raw_node=node,
+            name=type_text if type_text else "unknown_type"
         )

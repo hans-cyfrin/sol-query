@@ -26,6 +26,7 @@ class SourceFile:
     ast: Optional[List[ASTNode]] = None
     contracts: List[ContractDeclaration] = field(default_factory=list)
     imports: List[ImportStatement] = field(default_factory=list)
+    pragmas: List["PragmaDirective"] = field(default_factory=list)
     parse_errors: List[ParseError] = field(default_factory=list)
 
     def is_parsed(self) -> bool:
@@ -335,6 +336,12 @@ class SourceManager:
             source_file.imports = [
                 node for node in ast_nodes
                 if isinstance(node, ImportStatement)
+            ]
+
+            # Extract pragma directives
+            source_file.pragmas = [
+                node for node in ast_nodes
+                if hasattr(node, 'node_type') and node.node_type.value == "pragma_directive"
             ]
 
             # Update dependency tracking

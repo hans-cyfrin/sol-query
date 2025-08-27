@@ -47,6 +47,8 @@ class NodeType(str, Enum):
     EVENT = "event"
     ERROR = "error"
     IMPORT = "import"
+    PRAGMA_DIRECTIVE = "pragma_directive"
+    STRUCT_MEMBER = "struct_member"
 
     # Statements
     IF_STATEMENT = "if_statement"
@@ -495,7 +497,7 @@ class StructDeclaration(ASTNode):
 
     node_type: NodeType = Field(default=NodeType.STRUCT, frozen=True)
     name: str = Field(description="Struct name")
-    fields: List[VariableDeclaration] = Field(
+    fields: List["StructMember"] = Field(
         default_factory=list,
         description="Struct fields"
     )
@@ -503,6 +505,22 @@ class StructDeclaration(ASTNode):
     def get_children(self) -> List[ASTNode]:
         """Get child nodes."""
         return list(self.fields)
+
+
+class StructMember(ASTNode):
+    """Represents a struct member/field."""
+
+    node_type: NodeType = Field(default=NodeType.STRUCT_MEMBER, frozen=True)
+    name: str = Field(description="Member name")
+    type_name: str = Field(description="Member type")
+    storage_location: Optional[str] = Field(
+        default=None,
+        description="Storage location (memory, storage, calldata)"
+    )
+
+    def get_children(self) -> List[ASTNode]:
+        """Get child nodes."""
+        return []
 
 
 class EnumDeclaration(ASTNode):
@@ -565,6 +583,22 @@ class ExpressionStatement(Statement):
         """Get child nodes."""
         if self.expression:
             return [self.expression]
+        return []
+
+
+class EmitStatement(Statement):
+    """Represents an emit statement for events."""
+
+    node_type: NodeType = Field(default=NodeType.EMIT_STATEMENT, frozen=True)
+    event_call: Optional["Expression"] = Field(
+        default=None,
+        description="The event call expression"
+    )
+
+    def get_children(self) -> List[ASTNode]:
+        """Get child nodes."""
+        if self.event_call:
+            return [self.event_call]
         return []
 
 
@@ -816,6 +850,18 @@ class StructExpression(Expression):
         children = [self.type_expr]
         children.extend(self.fields)
         return children
+
+
+class PragmaDirective(ASTNode):
+    """Represents a pragma directive."""
+
+    node_type: NodeType = Field(default=NodeType.PRAGMA_DIRECTIVE, frozen=True)
+    pragma_type: str = Field(description="Type of pragma (e.g., 'solidity')")
+    pragma_value: str = Field(description="Value of the pragma (e.g., '^0.8.0')")
+
+    def get_children(self) -> List[ASTNode]:
+        """Get child nodes."""
+        return []
 
 
 class ImportStatement(ASTNode):

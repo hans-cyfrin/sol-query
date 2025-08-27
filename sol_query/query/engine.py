@@ -1324,16 +1324,34 @@ class SolidityQueryEngine:
             result = [f for f in result if f.has_asset_transfers == with_asset_transfers]
 
         # Filter by external calls (deep)
-        if with_external_calls_deep is not None:
+        if with_external_calls_deep is not None and not (with_external_calls is True and with_external_calls_deep is False):
+             # Import here to avoid circular imports
+             from sol_query.analysis.call_analyzer import CallAnalyzer
+             analyzer = CallAnalyzer()
+             all_functions = self._get_all_functions()
+             filtered = []
+             for func in result:
+                 has_deep_external_calls = analyzer.analyze_call_tree_external_calls(func, all_functions)
+                 if has_deep_external_calls == with_external_calls_deep:
+                     filtered.append(func)
+             result = filtered
+
+        # Special case: when both with_external_calls=True and with_external_calls_deep=False
+        # This should return functions that have direct external calls but NOT deep external calls
+        # (i.e., functions that only have direct external calls, not through their call tree)
+        if (with_external_calls is True and with_external_calls_deep is False):
             # Import here to avoid circular imports
             from sol_query.analysis.call_analyzer import CallAnalyzer
             analyzer = CallAnalyzer()
             all_functions = self._get_all_functions()
             filtered = []
             for func in result:
-                has_deep_external_calls = analyzer.analyze_call_tree_external_calls(func, all_functions)
-                if has_deep_external_calls == with_external_calls_deep:
-                    filtered.append(func)
+                # Function must have direct external calls
+                if func.has_external_calls:
+                    # Function must NOT have external calls through its call tree
+                    has_deep_external_calls = analyzer.analyze_call_tree_external_calls(func, all_functions)
+                    if not has_deep_external_calls:
+                        filtered.append(func)
             result = filtered
 
         # Filter by asset transfers (deep)

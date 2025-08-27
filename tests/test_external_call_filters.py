@@ -202,6 +202,39 @@ class TestExternalCallFilters:
         print(f"With external calls: {len(with_external)}, Without: {len(without_external)}")
         print(f"With asset transfers: {len(with_transfers)}, Without: {len(without_transfers)}")
 
+    def test_bug_demonstration(self, engine):
+        """Demonstrate the current bug in the fund_functions feature."""
+        # Get all functions with direct external calls
+        functions_with_direct_calls = engine.find_functions(with_external_calls=True)
+        print(f"Functions with direct external calls: {len(functions_with_direct_calls)}")
+        for func in functions_with_direct_calls:
+            print(f"  - {func.name}: {func.external_call_targets}")
+
+        # Get all functions with deep external calls
+        functions_with_deep_calls = engine.find_functions(with_external_calls_deep=True)
+        print(f"Functions with deep external calls: {len(functions_with_deep_calls)}")
+        for func in functions_with_deep_calls:
+            print(f"  - {func.name}: {func.external_call_targets}")
+
+        # Now the problematic query: with_external_calls=True, with_external_calls_deep=False
+        # This should return functions that have direct external calls but NOT deep external calls
+        problematic_query = engine.find_functions(
+            with_external_calls=True,
+            with_external_calls_deep=False
+        )
+        print(f"Problematic query result: {len(problematic_query)}")
+        for func in problematic_query:
+            print(f"  - {func.name}: {func.external_call_targets}")
+
+        # The issue: functions with direct external calls are being filtered out
+        # when with_external_calls_deep=False is specified
+        print("\nBUG ANALYSIS:")
+        print("1. withdraw() has direct external calls: True")
+        print("2. withdraw() also calls _processDeposit() which has external calls")
+        print("3. So withdraw() has deep external calls: True")
+        print("4. When with_external_calls_deep=False, withdraw() gets filtered out")
+        print("5. This is wrong! It should only filter out functions that DON'T have direct calls")
+
 
 if __name__ == "__main__":
     # Run a quick test

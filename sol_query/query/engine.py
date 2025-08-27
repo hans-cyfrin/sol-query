@@ -943,6 +943,21 @@ class SolidityQueryEngine:
 
         return unique_callees
 
+    # Convenience wrappers matching external tool expectations
+    def get_callers(self, function_name: str, contract_name: Optional[str] = None, depth: int = 1) -> List[FunctionDeclaration]:
+        """Wrapper to fetch callers of a function by name and optional contract scope."""
+        filters: Dict[str, Any] = {}
+        if contract_name:
+            filters["contract_name"] = contract_name
+        return self.find_callers_of(function_name, depth=depth, **filters)
+
+    def get_callees(self, function_name: str, contract_name: Optional[str] = None, depth: int = 1) -> List[FunctionDeclaration]:
+        """Wrapper to fetch callees of a function by name and optional contract scope."""
+        filters: Dict[str, Any] = {}
+        if contract_name:
+            filters["contract_name"] = contract_name
+        return self.find_callees_of(function_name, depth=depth, **filters)
+
     def find_call_chains(self, from_element: Union[str, FunctionDeclaration],
                         to_element: Union[str, FunctionDeclaration],
                         max_depth: int = 10) -> List[List[FunctionDeclaration]]:
@@ -2963,14 +2978,28 @@ class SolidityQueryEngine:
         """
         analyzer = self.import_analyzer()
 
+        # Start from either matched imports or all imports
         if pattern:
-            return analyzer.find_imports_matching(pattern)
+            imports = analyzer.find_imports_matching(pattern)
         else:
-            # Return all imports
-            all_imports = []
+            imports = []
             for source_file in self.source_manager.get_all_files():
-                all_imports.extend(source_file.imports)
-            return all_imports
+                imports.extend(source_file.imports)
+
+        # Optional file_name filter for convenience
+        file_name = filters.get("file_name") or filters.get("filename")
+        if file_name:
+            def _matches_file(import_stmt: Any) -> bool:
+                try:
+                    loc = getattr(import_stmt, "source_location", None)
+                    if loc and getattr(loc, "file_path", None):
+                        return str(loc.file_path).endswith(str(file_name))
+                except Exception:
+                    return False
+                return False
+            imports = [imp for imp in imports if _matches_file(imp)]
+
+        return imports
 
     def find_contracts_using_imports(self, import_patterns: Union[str, List[str]], **filters):
         """

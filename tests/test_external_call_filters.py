@@ -100,6 +100,22 @@ class TestExternalCallFilters:
         deep_asset_functions = engine.find_functions(with_asset_transfers_deep=True)
         print(f"Functions with asset transfers deep (traditional): {len(deep_asset_functions)}")
 
+    def test_external_calls_with_mutability_filter(self, engine):
+        """Ensure with_external_calls + state_mutability filters work together."""
+        # Query: functions that have direct external calls and are nonpayable or payable
+        filtered = engine.find_functions(
+            with_external_calls=True,
+            state_mutability=["nonpayable", "payable"]
+        )
+        # Should include withdraw (nonpayable) and claimReward (nonpayable)
+        names = {f.name for f in filtered}
+        assert "withdraw" in names
+        assert "claimReward" in names
+        # All returned must satisfy both conditions
+        for f in filtered:
+            assert f.has_external_calls is True
+            assert f.state_mutability.value in {"nonpayable", "payable"}
+
     def test_combined_filters(self, engine):
         """Test combining the new filters with existing ones."""
         # Find external functions that make external calls

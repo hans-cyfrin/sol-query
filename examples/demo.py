@@ -99,6 +99,8 @@ def main():
     if token_contract:
         contract_json = serializer.serialize_node(token_contract)
         print(f"   Token contract serialized (keys): {list(contract_json.keys())}")
+        if "source_code_preview" in contract_json:
+            print(f"   Source code preview: {contract_json['source_code_preview']}")
 
     # Serialize a collection with pagination
     all_functions = engine.functions

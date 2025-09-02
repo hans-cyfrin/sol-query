@@ -506,3 +506,137 @@ flow = engine.trace_variable_flow("balance", direction="both")
 # Pattern matching
 assembly = engine.find_by_pattern(r"assembly\s*\{")
 ```
+
+## JSON Serialization
+
+### LLMSerializer
+
+The `LLMSerializer` class provides configurable JSON serialization for analysis results, particularly useful for LLM integration and data export.
+
+#### Constructor
+
+```python
+from sol_query.utils.serialization import LLMSerializer, SerializationLevel
+
+serializer = LLMSerializer(level: SerializationLevel = SerializationLevel.DETAILED)
+```
+
+**Parameters:**
+- `level`: Default serialization detail level (`SUMMARY`, `DETAILED`, or `FULL`)
+
+#### Serialization Levels
+
+- **`SerializationLevel.SUMMARY`**: Basic information only
+- **`SerializationLevel.DETAILED`**: Comprehensive information (default)
+- **`SerializationLevel.FULL`**: Complete information including additional source details
+
+#### Methods
+
+##### `serialize_node(node: ASTNode, level: Optional[SerializationLevel] = None) -> Dict[str, Any]`
+
+Serialize a single AST node to a dictionary.
+
+**Returns a dictionary containing:**
+- `node_type`: The type of AST node
+- `source_code_preview`: A preview of the source code for this node (truncated for long code)
+- `source_location`: Location information (line, column, byte positions)
+- Additional type-specific fields based on the node type
+
+**Example:**
+```python
+serializer = LLMSerializer(SerializationLevel.DETAILED)
+contract = engine.contracts.with_name("Token").first()
+serialized = serializer.serialize_node(contract)
+
+print(serialized["source_code_preview"])  # Shows contract source code preview
+```
+
+##### `serialize_collection(collection: BaseCollection, level: Optional[SerializationLevel] = None, limit: Optional[int] = None) -> Dict[str, Any]`
+
+Serialize a collection of nodes.
+
+**Parameters:**
+- `collection`: The collection to serialize
+- `level`: Serialization level override
+- `limit`: Maximum number of items to include
+
+**Returns:**
+```python
+{
+    "collection_type": "ContractsCollection",
+    "total_count": 10,
+    "returned_count": 5,
+    "items": [
+        {"node_type": "contract_declaration", "source_code_preview": "contract Token...", ...},
+        ...
+    ]
+}
+```
+
+##### `serialize_query_result(result: Union[ASTNode, BaseCollection, List[ASTNode]], level: Optional[SerializationLevel] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]`
+
+Serialize any query result with metadata.
+
+**Returns:**
+```python
+{
+    "query_timestamp": "2024-01-15T10:30:00.000Z",
+    "serialization_level": "detailed",
+    "result_type": "collection",
+    "metadata": {},
+    "result": {...}
+}
+```
+
+##### `to_json(data: Any, indent: Optional[int] = 2) -> str`
+
+Convert serialized data to JSON string.
+
+#### Complete Example
+
+```python
+from sol_query import SolidityQueryEngine
+from sol_query.utils.serialization import LLMSerializer, SerializationLevel
+
+# Load contracts
+engine = SolidityQueryEngine("contracts/")
+
+# Create serializer
+serializer = LLMSerializer(SerializationLevel.DETAILED)
+
+# Serialize individual nodes
+contract = engine.contracts.with_name("Token").first()
+contract_data = serializer.serialize_node(contract)
+print(f"Contract source: {contract_data['source_code_preview']}")
+
+# Serialize collections
+functions = engine.functions.external()
+functions_data = serializer.serialize_collection(functions, limit=10)
+
+# Export to JSON file
+import json
+with open("analysis.json", "w") as f:
+    json.dump(functions_data, f, indent=2)
+
+# Full query result serialization
+result = serializer.serialize_query_result(
+    engine.functions.payable().with_external_calls(),
+    metadata={"analysis_type": "security_review"}
+)
+```
+
+#### Source Code Preview Field
+
+All serialized nodes include a `source_code_preview` field containing a preview of the source code for that AST element:
+
+- **Contracts**: Contract definition (truncated for long contracts)
+- **Functions**: Function implementation (truncated for long functions)
+- **Variables**: Variable declaration
+- **Statements**: Individual statement source
+- **Expressions**: Expression source code
+
+**Preview Format:**
+- **Short code (≤200 chars)**: Complete source code
+- **Long code (>200 chars)**: First 100 characters + "..." + last 100 characters
+
+This provides manageable source code previews for LLM processing while maintaining readability and keeping payload sizes reasonable.

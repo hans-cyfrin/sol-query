@@ -290,6 +290,18 @@ class TestSolBugBenchQueries:
 
         print(f"Serialization successful - {len(contract_dict)} contracts, {len(function_dict)} functions")
 
+        # Test LLMSerializer with source_code field
+        from sol_query.utils.serialization import LLMSerializer, SerializationLevel
+        serializer = LLMSerializer(SerializationLevel.DETAILED)
+
+        # Test that LLMSerializer includes source_code
+        contracts = engine.contracts
+        if len(contracts) > 0:
+            contract = contracts.first()
+            llm_serialized = serializer.serialize_node(contract)
+            assert "source_code_preview" in llm_serialized, "LLMSerializer should include source_code_preview field"
+            assert isinstance(llm_serialized["source_code_preview"], str), "source_code_preview should be a string"
+
     def test_error_handling_robustness(self, engine):
         """Test that queries handle edge cases gracefully."""
         # Non-existent contract

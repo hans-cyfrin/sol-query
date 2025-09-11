@@ -22,10 +22,36 @@ git clone https://github.com/hans-cyfrin/sol-query.git && cd sol-query && pip in
 
 ### Usage
 
+#### V2 Optimized API (Recommended)
+
+```python
+from sol_query.query.engine_v2 import SolidityQueryEngineV2
+
+# Load and analyze contracts
+engine = SolidityQueryEngineV2("path/to/contracts")
+
+# Universal query function - handles any Solidity construct
+result = engine.query_code("functions", {
+    "visibility": "external",
+    "has_external_calls": True,
+    "names": ["*transfer*", "*withdraw*"]
+})
+
+# Multi-depth element analysis
+details = engine.get_details("function", ["emergencyWithdraw"], 
+                            analysis_depth="comprehensive")
+
+# Reference tracking and call graphs
+refs = engine.find_references("totalSupply", "variable", 
+                             reference_type="all", direction="both")
+```
+
+#### V1 Traditional/Fluent API
+
 ```python
 from sol_query import SolidityQueryEngine
 
-# Load and analyze contracts
+# Load and analyze contracts  
 engine = SolidityQueryEngine("path/to/contracts")
 
 # Traditional API - simple and direct
@@ -48,17 +74,26 @@ import_deps = engine.analyze_imports("*OpenZeppelin*")
 
 ## 📚 Documentation
 
-- **[📖 Complete API Reference](docs/api-reference.md)** - Comprehensive method documentation with all parameters and examples
+- **[⚡ V2 API Reference](docs/api-reference-v2.md)** - New optimized 3-method interface for high-performance analysis
+- **[📖 V1 API Reference](docs/api-reference.md)** - Traditional/fluent API documentation with all parameters and examples
 - **[🏗️ Architecture Overview](docs/architecture.md)** - System design and component details
 - **[📋 Documentation Hub](docs/README.md)** - Quick navigation and use cases
 
 ## ✨ Key Features
 
-### 🔍 **Dual Query Interface**
-- **Traditional Style**: `engine.find_functions(visibility="public", state_mutability="view")`
+### 🔍 **Multiple Query Interfaces**
+- **V2 Optimized**: `engine.query_code("functions", {"visibility": "external", "has_external_calls": True})`
+- **Traditional Style**: `engine.find_functions(visibility="public", state_mutability="view")`  
 - **Fluent Style**: `engine.functions.public().view().with_name("get*")`
 - **Method Chaining**: `contracts.interfaces().functions.external().payable()`
 - **Set Operations**: `union()`, `intersect()`, `subtract()` for complex compositions
+
+### ⚡ **V2 Performance Optimizations**
+- **Three Core Methods**: Universal `query_code()`, detailed `get_details()`, reference `find_references()`
+- **Advanced Filtering**: 20+ filter types with regex and wildcard support
+- **Multi-depth Analysis**: Basic, detailed, and comprehensive analysis levels
+- **Security Patterns**: Built-in detection for reentrancy, access control, and asset flow
+- **Standardized Responses**: Consistent JSON format with metadata and suggestions
 
 ### 🛡️ **Advanced Security Analysis**
 - **External Call Detection**: Identify functions making cross-contract calls
@@ -163,6 +198,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 📚 Documentation
 
-- **[Complete API Documentation](docs/api-reference.md)** - Full API reference with all methods
+- **[V2 API Documentation](docs/api-reference-v2.md)** - Optimized 3-method interface reference
+- **[V1 API Documentation](docs/api-reference.md)** - Traditional/fluent API reference with all methods
 - **[Architecture Guide](docs/architecture.md)** - Technical implementation details
 - **[Documentation Hub](docs/README.md)** - All documentation resources

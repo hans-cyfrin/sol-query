@@ -4,8 +4,23 @@ Complete documentation for the Sol-Query Solidity code analysis engine.
 
 ## Documentation Structure
 
-### 📚 [API Reference](api-reference.md)
-**COMPREHENSIVE** reference for all classes, methods, and enums.
+### 📚 API References
+
+#### [V2 API Reference](api-reference-v2.md) ⭐ **NEW**
+**OPTIMIZED** three-method interface for high-performance analysis.
+
+**Key Features:**
+- `query_code()` - Universal query function for any Solidity construct
+- `get_details()` - Multi-depth element analysis (basic/detailed/comprehensive)
+- `find_references()` - Reference tracking and call chain analysis
+- Built-in security pattern detection
+- Standardized response format
+- Advanced filtering and scoping
+
+**Perfect for:** Security analysis, performance-critical applications, advanced filtering
+
+#### [V1 API Reference](api-reference.md)
+**COMPREHENSIVE** reference for traditional and fluent APIs.
 
 **What's Included:**
 - Complete method signatures with all parameters
@@ -22,6 +37,30 @@ Complete documentation for the Sol-Query Solidity code analysis engine.
 - [AST Node Classes](api-reference.md#ast-node-classes) - Core data structures
 - [Enums and Constants](api-reference.md#enums-and-constants) - All possible values
 - [Advanced Features](api-reference.md#advanced-features) - Data flow, imports, composition
+
+### 🔄 API Comparison
+
+| Feature | V2 Optimized | V1 Traditional | V1 Fluent |
+|---------|-------------|----------------|-----------|
+| **Interface** | 3 core methods | 20+ finder methods | Method chaining |
+| **Performance** | Optimized | Standard | Standard |
+| **Security Analysis** | Built-in patterns | Manual composition | Manual composition |
+| **Response Format** | Standardized JSON | Python objects | Python objects |
+| **Filter Complexity** | 20+ filter types | Basic filters | Chainable filters |
+| **Learning Curve** | Medium | Easy | Medium |
+| **Use Case** | Security/Performance | General purpose | Complex queries |
+
+**Choose V2 when:**
+- Performance is critical
+- You need advanced security analysis
+- You want standardized JSON responses
+- You're building security tools
+
+**Choose V1 when:**
+- You prefer object-oriented interfaces
+- You need maximum flexibility
+- You're migrating existing code
+- You want the most comprehensive API
 
 ### 🏗️ [Architecture Overview](architecture.md)
 Deep dive into the system design and component architecture.
@@ -43,6 +82,30 @@ pip install sol-query
 ```
 
 ### Basic Usage
+
+#### V2 Optimized API (Recommended for new projects)
+```python
+from sol_query.query.engine_v2 import SolidityQueryEngineV2
+
+# Load and analyze contracts
+engine = SolidityQueryEngineV2("path/to/contracts")
+
+# Universal query function
+result = engine.query_code("functions", {
+    "visibility": "external",
+    "has_external_calls": True
+})
+
+# Detailed analysis
+details = engine.get_details("function", ["transfer", "withdraw"], 
+                            analysis_depth="comprehensive")
+
+# Reference tracking
+refs = engine.find_references("totalSupply", "variable", 
+                             reference_type="all")
+```
+
+#### V1 Traditional/Fluent API 
 ```python
 from sol_query import SolidityQueryEngine
 
@@ -217,4 +280,46 @@ Sol-Query provides comprehensive error handling:
 
 ---
 
-For the most up-to-date API reference and examples, see [api-reference.md](api-reference.md).
+## 🚀 Quick Reference
+
+### V2 Core Methods
+```python
+# Universal query - any Solidity construct
+result = engine.query_code(query_type, filters, scope, include, options)
+
+# Detailed analysis - multiple depth levels  
+details = engine.get_details(element_type, identifiers, analysis_depth)
+
+# Reference tracking - find relationships
+refs = engine.find_references(target, target_type, reference_type, direction)
+```
+
+### V1 Essential Methods
+```python
+# Traditional finder methods
+contracts = engine.find_contracts(name_patterns="*Token*")
+functions = engine.find_functions(visibility="external")
+
+# Fluent chaining
+results = engine.contracts.with_name("*").functions.external()
+
+# Advanced analysis
+call_graph = engine.analyze_call_graph()
+flow_paths = engine.trace_variable_flow("balance", "transfer")
+```
+
+### Common Security Patterns
+```python
+# V2: Reentrancy detection
+engine.query_code("functions", {
+    "has_external_calls": True, 
+    "changes_state": True
+})
+
+# V1: Same analysis
+engine.functions.with_external_calls().where(lambda f: f.changes_state())
+```
+
+---
+
+📖 **For complete documentation:** [V2 API Reference](api-reference-v2.md) | [V1 API Reference](api-reference.md)

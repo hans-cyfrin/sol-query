@@ -550,21 +550,24 @@ class SolidityQueryEngineV2:
         elif query_type == "expressions":
             return [node for node in all_nodes if isinstance(node, Expression)]
         elif query_type == "calls":
-            # Extract calls from function bodies - simplified approach
+            # Extract calls from function bodies using AST analysis
             calls = []
             functions = [node for node in all_nodes if isinstance(node, FunctionDeclaration)]
             for func in functions:
-                if hasattr(func, 'source_code') and func.source_code:
-                    # Create mock call nodes for detected calls
-                    call_patterns = [r'\w+\s*\(', r'\w+\.\w+\s*\(']
-                    for pattern in call_patterns:
-                        matches = re.finditer(pattern, func.source_code)
-                        for match in matches:
-                            # Create a mock call node
-                            call_node = Mock()
-                            call_node.source_code = match.group(0)
-                            call_node.name = match.group(0).split('(')[0]
-                            calls.append(call_node)
+                if hasattr(func, 'raw_node') and func.raw_node:
+                    # Get all calls from this function using AST traversal
+                    func_calls = self._get_node_calls(func)
+                    for call in func_calls:
+                        # Create a mock call node with standardized format
+                        call_node = Mock()
+                        call_node.source_code = call.get('name', '')
+                        call_node.name = call.get('name', '')
+                        call_node.call_type = call.get('type', 'unknown')
+                        call_node.position = call.get('position', 0)
+                        call_node.parent_function = getattr(func, 'name', None)
+                        call_node.contract = getattr(func, 'contract', None)
+                        call_node.file_path = getattr(func, 'file_path', None)
+                        calls.append(call_node)
             return calls
         else:
             return []
@@ -733,36 +736,48 @@ class SolidityQueryEngineV2:
         return filtered
 
     def _has_external_calls(self, node: ASTNode) -> bool:
-        """Check if a node contains external calls."""
-        if not hasattr(node, 'source_code') or not node.source_code:
+        """Check if a node contains external calls using AST analysis."""
+        if not hasattr(node, 'raw_node') or not node.raw_node:
             return False
 
-        source = node.source_code
-
-        # Low-level calls
-        low_level_patterns = [
-            r'\.call\s*\(',
-            r'\.delegatecall\s*\(',
-            r'\.staticcall\s*\(',
-            r'\.send\s*\(',
-            r'\.transfer\s*\('
-        ]
-
-        for pattern in low_level_patterns:
-            if re.search(pattern, source):
-                return True
-
-        # Interface calls (pattern: contract.method())
-        interface_call_pattern = r'\w+\.\w+\s*\([^)]*\)'
-        if re.search(interface_call_pattern, source):
-            # Exclude common false positives
-            false_positives = ['msg.sender', 'block.timestamp', 'msg.value', 'tx.origin']
-            matches = re.findall(interface_call_pattern, source)
-            for match in matches:
-                if not any(fp in match for fp in false_positives):
+        def check_for_external_calls(ts_node) -> bool:
+            """Recursively traverse tree-sitter nodes to find external calls."""
+            if not ts_node:
+                return False
+                
+            node_type = ts_node.type
+            
+            # Check for call expressions
+            if node_type == "call_expression":
+                call_info = self._analyze_call_expression(ts_node)
+                if call_info and call_info.get('type') in ['external', 'low_level']:
                     return True
+                    
+            # Check for member access that might be external calls
+            elif node_type == "member_access":
+                member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+                if member_text:
+                    # Check for low-level calls
+                    if any(method in member_text for method in ['call', 'delegatecall', 'staticcall', 'send', 'transfer']):
+                        return True
+                    # Check for external contract calls (exclude builtins)
+                    builtin_members = {
+                        'msg.sender', 'msg.value', 'msg.data', 'msg.sig',
+                        'block.timestamp', 'block.number', 'block.coinbase', 
+                        'tx.origin', 'tx.gasprice'
+                    }
+                    if '.' in member_text and member_text not in builtin_members:
+                        # This could be an external contract call
+                        return True
+            
+            # Recursively check children
+            for child in ts_node.children:
+                if check_for_external_calls(child):
+                    return True
+                    
+            return False
 
-        return False
+        return check_for_external_calls(node.raw_node)
 
     def _filter_by_state_changes(self, nodes: List[ASTNode], changes_state: bool) -> List[ASTNode]:
         """Filter functions that change state."""
@@ -776,38 +791,68 @@ class SolidityQueryEngineV2:
         return filtered
 
     def _changes_state(self, node: ASTNode) -> bool:
-        """Check if a node modifies state variables."""
-        if not hasattr(node, 'source_code') or not node.source_code:
+        """Check if a node modifies state variables using AST analysis."""
+        if not hasattr(node, 'raw_node') or not node.raw_node:
             return False
 
-        source = node.source_code
-
-        # State-changing patterns
-        state_change_patterns = [
-            r'\w+\s*=\s*[^=]',  # Assignment (not comparison)
-            r'\w+\s*\+=',       # Addition assignment
-            r'\w+\s*-=',        # Subtraction assignment
-            r'\w+\s*\*=',       # Multiplication assignment
-            r'\w+\s*/=',        # Division assignment
-            r'\w+\+\+',         # Increment
-            r'\+\+\w+',         # Pre-increment
-            r'\w+--',           # Decrement
-            r'--\w+',           # Pre-decrement
-            r'\w+\[.+\]\s*=',   # Array/mapping assignment
-            r'push\s*\(',       # Array push
-            r'pop\s*\(',        # Array pop
-            r'delete\s+\w+',    # Delete statement
-        ]
-
-        for pattern in state_change_patterns:
-            if re.search(pattern, source):
+        def check_for_state_changes(ts_node) -> bool:
+            """Recursively traverse tree-sitter nodes to find state changes."""
+            if not ts_node:
+                return False
+                
+            node_type = ts_node.type
+            
+            # Check for assignment operations
+            if node_type == "assignment_operator":
                 return True
+                
+            # Check for compound assignments (+=, -=, *=, /=)
+            elif node_type in ["augmented_assignment_operator", "compound_assignment"]:
+                return True
+                
+            # Check for update expressions (++, --)
+            elif node_type in ["update_expression", "unary_expression"]:
+                operator_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+                if any(op in operator_text for op in ['++', '--']):
+                    return True
+                    
+            # Check for function calls that modify state
+            elif node_type == "call_expression":
+                call_info = self._analyze_call_expression(ts_node)
+                if call_info:
+                    call_name = call_info.get('name', '').lower()
+                    # State-modifying function patterns
+                    state_modifying_calls = {'push', 'pop', 'delete', 'transfer', 'send'}
+                    if any(method in call_name for method in state_modifying_calls):
+                        return True
+                        
+            # Check for member access assignments (e.g., balances[user] = amount)
+            elif node_type == "index_access":
+                # Check if this index access is on the left side of an assignment
+                parent = ts_node.parent
+                if parent and parent.type == "assignment_operator":
+                    # Check if this is the left operand
+                    if parent.children and parent.children[0] == ts_node:
+                        return True
+                        
+            # Check for delete statements
+            elif node_type == "delete_statement":
+                return True
+                
+            # Check for storage variable declarations with assignments
+            elif node_type == "variable_declaration":
+                var_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+                if 'storage' in var_text and '=' in var_text:
+                    return True
+            
+            # Recursively check children
+            for child in ts_node.children:
+                if check_for_state_changes(child):
+                    return True
+                    
+            return False
 
-        # Check for storage keywords
-        if re.search(r'\bstorage\b', source) and '=' in source:
-            return True
-
-        return False
+        return check_for_state_changes(node.raw_node)
 
     def _matches_pattern(self, text: str, pattern: str) -> bool:
         """Check if text matches pattern (exact or regex)."""
@@ -834,7 +879,7 @@ class SolidityQueryEngineV2:
                 result_item.update({
                     "visibility": str(getattr(node, 'visibility', '')),
                     "state_mutability": str(getattr(node, 'state_mutability', '')),
-                    "signature": getattr(node, 'signature', None)
+                    "signature": node.get_signature() if hasattr(node, 'get_signature') else None
                 })
             elif isinstance(node, ContractDeclaration):
                 result_item.update({
@@ -850,7 +895,7 @@ class SolidityQueryEngineV2:
 
             # Add included data
             if "source" in include:
-                result_item["source_code"] = getattr(node, 'source_code', None)
+                result_item["source_code"] = node.get_source_code() if hasattr(node, 'get_source_code') else None
 
             if "ast" in include:
                 result_item["ast_info"] = self._get_ast_info(node)
@@ -1013,7 +1058,7 @@ class SolidityQueryEngineV2:
             "name": getattr(element, 'name', None),
             "type": type(element).__name__,
             "location": self._get_node_location(element),
-            "signature": getattr(element, 'signature', None) if isinstance(element, FunctionDeclaration) else None
+            "signature": element.get_signature() if isinstance(element, FunctionDeclaration) and hasattr(element, 'get_signature') else None
         }
 
     def _get_detailed_element_info(self, element: ASTNode, options: Dict[str, Any]) -> Dict[str, Any]:
@@ -1357,11 +1402,20 @@ class SolidityQueryEngineV2:
 
     def _get_node_location(self, node: ASTNode) -> Dict[str, Any]:
         """Get location information for a node."""
+        # Get contract name depending on node type
+        contract_name = None
+        if isinstance(node, FunctionDeclaration) and hasattr(node, 'parent_contract') and node.parent_contract:
+            contract_name = getattr(node.parent_contract, 'name', None)
+        elif isinstance(node, ContractDeclaration):
+            contract_name = getattr(node, 'name', None)
+        elif hasattr(node, 'contract'):
+            contract_name = getattr(node, 'contract', None)
+            
         return {
             "file": getattr(node, 'file_path', None),
             "line": getattr(node, 'line_number', None),
             "column": getattr(node, 'column', None),
-            "contract": getattr(node, 'contract', None)
+            "contract": contract_name
         }
 
     def _get_analysis_scope(self, scope: Dict[str, Any]) -> Dict[str, Any]:
@@ -1551,28 +1605,62 @@ class SolidityQueryEngineV2:
         return filtered
 
     def _has_asset_transfers(self, node: ASTNode) -> bool:
-        """Check if node contains asset transfers."""
-        if not hasattr(node, 'source_code') or not node.source_code:
+        """Check if node contains asset transfers using AST analysis."""
+        if not hasattr(node, 'raw_node') or not node.raw_node:
             return False
 
-        source = node.source_code
+        def check_for_asset_transfers(ts_node) -> bool:
+            """Recursively traverse tree-sitter nodes to find asset transfers."""
+            if not ts_node:
+                return False
+                
+            node_type = ts_node.type
+            
+            # Check for function calls that might be asset transfers
+            if node_type == "call_expression":
+                call_info = self._analyze_call_expression(ts_node)
+                if call_info:
+                    call_name = call_info.get('name', '').lower()
+                    # Asset transfer function patterns
+                    transfer_functions = {
+                        'transfer', 'send', 'safetransfer', 'transferfrom', '_transfer'
+                    }
+                    if any(func in call_name for func in transfer_functions):
+                        return True
+                        
+            # Check for member access that indicates asset transfers
+            elif node_type == "member_access":
+                member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+                if member_text:
+                    # Check for Ether transfer methods
+                    ether_transfer_methods = {'transfer', 'send'}
+                    if any(f'.{method}' in member_text for method in ether_transfer_methods):
+                        return True
+                        
+            # Check for call expressions with value field (e.g., call{value: amount})
+            elif node_type == "call_options":
+                # This indicates a call with options like {value: ...}
+                options_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+                if 'value' in options_text.lower():
+                    return True
+                    
+            # Check for payable cast expressions  
+            elif node_type == "call_expression":
+                # Look for payable(...) patterns
+                for child in ts_node.children:
+                    if child.type == "identifier":
+                        func_name = child.text.decode('utf-8') if child.text else ''
+                        if func_name == 'payable':
+                            return True
+            
+            # Recursively check children
+            for child in ts_node.children:
+                if check_for_asset_transfers(child):
+                    return True
+                    
+            return False
 
-        # Asset transfer patterns
-        transfer_patterns = [
-            r'\.transfer\s*\(',
-            r'\.send\s*\(',
-            r'\.call\s*\{\s*value\s*:',
-            r'payable\s*\(',
-            r'_transfer\s*\(',
-            r'safeTransfer\s*\(',
-            r'transferFrom\s*\('
-        ]
-
-        for pattern in transfer_patterns:
-            if re.search(pattern, source):
-                return True
-
-        return False
+        return check_for_asset_transfers(node.raw_node)
 
     def _filter_by_payable(self, nodes: List[ASTNode], is_payable: bool) -> List[ASTNode]:
         """Filter for payable functions."""
@@ -1626,7 +1714,7 @@ class SolidityQueryEngineV2:
         """Filter by operators used."""
         filtered = []
         for node in nodes:
-            source = getattr(node, 'source_code', '')
+            source = node.get_source_code() if hasattr(node, 'get_source_code') else ''
             if source and any(op in source for op in operators):
                 filtered.append(node)
         return filtered
@@ -1635,7 +1723,7 @@ class SolidityQueryEngineV2:
         """Filter by access patterns."""
         filtered = []
         for node in nodes:
-            source = getattr(node, 'source_code', '')
+            source = node.get_source_code() if hasattr(node, 'get_source_code') else ''
             if source:
                 for pattern in patterns:
                     if self._matches_pattern(source, pattern):
@@ -1644,30 +1732,37 @@ class SolidityQueryEngineV2:
         return filtered
 
     def _filter_by_call_types(self, nodes: List[ASTNode], call_types: List[str]) -> List[ASTNode]:
-        """Filter by call types."""
+        """Filter by call types using AST analysis."""
         filtered = []
         for node in nodes:
-            source = getattr(node, 'source_code', '')
-            if source:
+            # Get all calls made by this node
+            calls = self._get_node_calls(node)
+            for call in calls:
+                call_name = call.get('name', '').lower()
+                # Check if any call type matches
                 for call_type in call_types:
-                    pattern = f'\\.{call_type}\\s*\\('
-                    if re.search(pattern, source):
+                    if call_type.lower() in call_name:
                         filtered.append(node)
                         break
+                else:
+                    continue
+                break
         return filtered
 
     def _filter_by_low_level_calls(self, nodes: List[ASTNode], is_low_level: bool) -> List[ASTNode]:
-        """Filter for low-level calls."""
+        """Filter for low-level calls using AST analysis."""
         if not is_low_level:
             return nodes
 
         filtered = []
         for node in nodes:
-            source = getattr(node, 'source_code', '')
-            if source:
-                low_level_patterns = [r'\.call\s*\(', r'\.delegatecall\s*\(', r'\.staticcall\s*\(', r'\.send\s*\(', r'\.transfer\s*\(']
-                if any(re.search(pattern, source) for pattern in low_level_patterns):
+            # Get all calls made by this node
+            calls = self._get_node_calls(node)
+            for call in calls:
+                call_type = call.get('type', '')
+                if call_type == 'low_level':
                     filtered.append(node)
+                    break
         return filtered
 
     def _get_ast_info(self, node: ASTNode) -> Dict[str, Any]:
@@ -1681,31 +1776,157 @@ class SolidityQueryEngineV2:
         }
 
     def _get_node_calls(self, node: ASTNode) -> List[Dict[str, Any]]:
-        """Get function calls made by a node."""
+        """Get function calls made by a node using AST traversal."""
         calls = []
-        source = getattr(node, 'source_code', '')
-
-        if source:
-            # Extract function calls using regex patterns
-            call_patterns = [
-                r'(\w+)\s*\(',  # Simple function calls
-                r'(\w+\.\w+)\s*\(',  # Method calls
-                r'\.call\s*\(',  # Low-level calls
-                r'\.delegatecall\s*\(',
-                r'\.staticcall\s*\('
-            ]
-
-            for pattern in call_patterns:
-                matches = re.finditer(pattern, source)
-                for match in matches:
-                    call_name = match.group(1) if match.lastindex else 'call'
-                    calls.append({
-                        'name': call_name,
-                        'type': 'external' if '.' in call_name else 'internal',
-                        'position': match.start()
-                    })
-
+        
+        if not hasattr(node, 'raw_node') or not node.raw_node:
+            return calls
+            
+        # Track found calls to avoid duplicates
+        found_calls = set()
+        
+        def traverse_node(ts_node):
+            """Recursively traverse tree-sitter nodes to find function calls."""
+            if not ts_node:
+                return
+                
+            node_type = ts_node.type
+            
+            # Identify function call patterns
+            if node_type == "call_expression":
+                call_info = self._analyze_call_expression(ts_node)
+                if call_info:
+                    call_key = f"{call_info['name']}_{call_info['position']}"
+                    if call_key not in found_calls:
+                        calls.append(call_info)
+                        found_calls.add(call_key)
+                        
+            elif node_type == "member_access":
+                # Check if this member access is part of a low-level call
+                member_call = self._analyze_member_call(ts_node)
+                if member_call:
+                    call_key = f"{member_call['name']}_{member_call['position']}"
+                    if call_key not in found_calls:
+                        calls.append(member_call)
+                        found_calls.add(call_key)
+            
+            # Recursively traverse children
+            for child in ts_node.children:
+                traverse_node(child)
+        
+        traverse_node(node.raw_node)
         return calls
+    
+    def _analyze_call_expression(self, ts_node) -> Optional[Dict[str, Any]]:
+        """Analyze a call_expression node to extract call information."""
+        try:
+            # Find the function being called
+            function_node = None
+            
+            # First check direct children for identifier/member_access
+            for child in ts_node.children:
+                if child.type in ["identifier", "member_access"]:
+                    function_node = child
+                    break
+                # Also check inside expression nodes
+                elif child.type == "expression":
+                    for expr_child in child.children:
+                        if expr_child.type in ["identifier", "member_access"]:
+                            function_node = expr_child
+                            break
+                    if function_node:
+                        break
+                    
+            if not function_node:
+                return None
+                
+            call_name = function_node.text.decode('utf-8') if function_node.text else None
+            if not call_name:
+                return None
+                
+            # Determine call type based on the function name/structure
+            call_type = self._classify_call_type(call_name, function_node)
+            
+            return {
+                'name': call_name,
+                'type': call_type,
+                'position': function_node.start_byte,
+                'arguments_count': self._count_call_arguments(ts_node)
+            }
+            
+        except Exception:
+            return None
+    
+    def _analyze_member_call(self, ts_node) -> Optional[Dict[str, Any]]:
+        """Analyze member access that might be a low-level call."""
+        try:
+            member_text = ts_node.text.decode('utf-8') if ts_node.text else None
+            if not member_text:
+                return None
+                
+            # Check for low-level call patterns
+            low_level_calls = {
+                'call', 'delegatecall', 'staticcall', 'send', 'transfer'
+            }
+            
+            # Extract the method name from member access
+            parts = member_text.split('.')
+            if len(parts) >= 2:
+                method_name = parts[-1]
+                if method_name in low_level_calls:
+                    return {
+                        'name': member_text,
+                        'type': 'low_level',
+                        'position': ts_node.start_byte,
+                        'call_method': method_name
+                    }
+                    
+        except Exception:
+            pass
+            
+        return None
+    
+    def _classify_call_type(self, call_name: str, function_node) -> str:
+        """Classify the type of function call."""
+        # Built-in functions
+        builtin_functions = {
+            'require', 'assert', 'revert', 'keccak256', 'sha256', 'ripemd160',
+            'ecrecover', 'addmod', 'mulmod', 'selfdestruct'
+        }
+        
+        if call_name in builtin_functions:
+            return 'builtin'
+            
+        # Low-level calls
+        if '.' in call_name:
+            parts = call_name.split('.')
+            method = parts[-1]
+            if method in {'call', 'delegatecall', 'staticcall', 'send', 'transfer'}:
+                return 'low_level'
+            else:
+                return 'external'
+        
+        # Library calls (if the function name suggests it)
+        if any(lib in call_name.lower() for lib in ['safemath', 'strings', 'address']):
+            return 'library'
+            
+        # Default to internal for simple identifiers
+        return 'internal'
+    
+    def _count_call_arguments(self, call_node) -> int:
+        """Count the number of arguments in a function call."""
+        try:
+            for child in call_node.children:
+                if child.type == "arguments":
+                    # Count comma-separated arguments
+                    arg_count = 0
+                    for arg_child in child.children:
+                        if arg_child.type != "," and arg_child.type not in ["(", ")"]:
+                            arg_count += 1
+                    return arg_count
+        except Exception:
+            pass
+        return 0
 
     def _get_node_callers(self, node: ASTNode) -> List[Dict[str, Any]]:
         """Get functions that call this node."""
@@ -1728,51 +1949,312 @@ class SolidityQueryEngineV2:
         return callers
 
     def _get_node_variables(self, node: ASTNode) -> List[Dict[str, Any]]:
-        """Get variables accessed by a node."""
+        """Get variables accessed by a node using AST traversal."""
         variables = []
-        source = getattr(node, 'source_code', '')
-
-        if source:
-            # Extract variable access patterns
-            var_patterns = [
-                r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=',  # Assignment targets
-                r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\[',  # Array access
-                r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.',  # Member access
-                r'\b(msg\.(sender|value|data))',     # Built-in variables
-                r'\b(block\.(timestamp|number))',   # Block variables
-                r'\b(tx\.origin)'                   # Transaction variables
-            ]
-
-            for pattern in var_patterns:
-                matches = re.finditer(pattern, source)
-                for match in matches:
-                    var_name = match.group(1)
-                    if var_name and not var_name.isdigit():  # Exclude numbers
-                        variables.append({
-                            'name': var_name,
-                            'access_type': 'read' if '=' not in match.group(0) else 'write',
-                            'position': match.start()
-                        })
-
+        
+        if not hasattr(node, 'raw_node') or not node.raw_node:
+            return variables
+            
+        # Track found variables to avoid duplicates
+        found_vars = set()
+        
+        def traverse_node(ts_node, parent_context=None):
+            """Recursively traverse tree-sitter nodes to find variable access."""
+            if not ts_node:
+                return
+                
+            node_type = ts_node.type
+            
+            # Skip certain contexts where identifiers are not variables
+            skip_contexts = {
+                'function_definition', 'constructor_definition', 'modifier_definition',
+                'function_call', 'modifier_invocation', 'parameter_list', 'type_name',
+                'function_type', 'event_definition', 'struct_definition', 'enum_definition'
+            }
+            
+            if parent_context in skip_contexts:
+                # Still traverse children but don't capture variables in these contexts
+                for child in ts_node.children:
+                    traverse_node(child, node_type)
+                return
+            
+            # Handle member access first (e.g., msg.sender, block.timestamp)
+            if node_type == "member_access":
+                member_info = self._analyze_member_access(ts_node)
+                if member_info and member_info['name'] not in found_vars:
+                    variables.append(member_info)
+                    found_vars.add(member_info['name'])
+                # Don't traverse children of member_access to avoid processing individual parts
+                return
+                    
+            # Handle array/mapping access like balances[user] 
+            elif node_type == "index_access":
+                index_info = self._analyze_index_access(ts_node, parent_context)
+                if index_info and index_info['name'] not in found_vars:
+                    variables.append(index_info)
+                    found_vars.add(index_info['name'])
+                # Still traverse children to find variables in the index expression
+                    
+            # Handle standalone identifiers (but only in appropriate contexts)
+            elif node_type == "identifier":
+                # Skip if this identifier is part of a member access expression
+                if parent_context in {'member_access', 'call_expression', 'emit_statement'}:
+                    pass  # Skip identifiers in these contexts
+                else:
+                    var_name = ts_node.text.decode('utf-8') if ts_node.text else None
+                    if var_name and var_name not in found_vars:
+                        var_info = self._analyze_identifier_context(ts_node, var_name, parent_context)
+                        if var_info:
+                            variables.append(var_info)
+                            found_vars.add(var_name)
+            
+            # Recursively traverse children
+            for child in ts_node.children:
+                traverse_node(child, node_type)
+        
+        traverse_node(node.raw_node)
         return variables
+    
+    def _analyze_identifier_context(self, ts_node, var_name: str, parent_context: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Analyze an identifier node to determine if it's a relevant variable."""
+        # Skip common keywords, types, and built-in globals
+        excluded_names = {
+            # Keywords and control flow
+            'require', 'revert', 'assert', 'return', 'if', 'for', 'while', 'do',
+            'function', 'modifier', 'emit', 'event', 'struct', 'enum', 'new', 'delete',
+            'contract', 'interface', 'library', 'using', 'pragma', 'import', 'is', 'override',
+            
+            # Types
+            'uint256', 'uint128', 'uint64', 'uint32', 'uint16', 'uint8', 'uint',
+            'int256', 'int128', 'int64', 'int32', 'int16', 'int8', 'int',
+            'address', 'bool', 'string', 'bytes', 'bytes32', 'bytes4',
+            'mapping', 'array',
+            
+            # Storage/memory modifiers
+            'memory', 'storage', 'calldata', 
+            
+            # Function modifiers
+            'view', 'pure', 'payable', 'constant', 'immutable',
+            'public', 'private', 'internal', 'external',
+            
+            # Literals and built-ins
+            'true', 'false', 'null', 'this', 'super',
+            
+            # Built-in globals (individual parts)
+            'msg', 'block', 'tx', 'gasleft', 'now',
+            
+            # Common identifiers that aren't variables
+            'sender', 'value', 'data', 'sig', 'timestamp', 'number', 'coinbase', 'difficulty',
+            'origin', 'gasprice',
+            
+            # Common function names that get misidentified
+            'transfer', 'approve', 'mint', 'burn', 'add', 'sub', 'mul', 'div',
+            'safeTransfer', 'safeTransferFrom', '_mint', '_burn', '_transfer', '_approve',
+            '_safeMint', '_safeBurn', 'transferFrom', 'increaseAllowance', 'decreaseAllowance',
+            
+            # Common modifier names
+            'onlyOwner', 'nonReentrant', 'whenNotPaused', 'validAddress',
+            
+            # Event names that might be captured
+            'Transfer', 'Approval', 'Mint', 'Burn', 'TokenMinted', 'OwnershipTransferred'
+        }
+        
+        if var_name.lower() in excluded_names:
+            return None
+            
+        # Determine variable type and access pattern
+        var_type = self._classify_variable_type(var_name, parent_context)
+        if not var_type:
+            return None
+            
+        access_type = self._determine_access_type(ts_node)
+        
+        return {
+            'name': var_name,
+            'access_type': access_type,
+            'position': ts_node.start_byte,
+            'variable_type': var_type
+        }
+    
+    def _analyze_member_access(self, ts_node) -> Optional[Dict[str, Any]]:
+        """Analyze member access expressions like contract.method or object.property."""
+        try:
+            # Get the full member access text
+            member_text = ts_node.text.decode('utf-8') if ts_node.text else None
+            if not member_text:
+                return None
+                
+            # Skip built-in globals - these are NOT variables we want to track
+            builtin_globals = {
+                'msg.sender', 'msg.value', 'msg.data', 'msg.sig', 
+                'block.timestamp', 'block.number', 'block.coinbase', 'block.difficulty',
+                'tx.origin', 'tx.gasprice', 'gasleft()', 'this.balance'
+            }
+            
+            if member_text in builtin_globals:
+                # These are built-in globals, not variables we want to track
+                return None
+                
+            # For other member access (like state.property or contract.method), 
+            # we want to extract the base object as a variable
+            parts = member_text.split('.', 1)
+            if len(parts) >= 2:
+                base_name = parts[0]
+                
+                # Skip common patterns that aren't variables
+                if base_name in {'msg', 'block', 'tx', 'this', 'super'}:
+                    return None
+                    
+                # This could be a state variable or contract reference
+                var_type = self._classify_variable_type(base_name, 'member_access')
+                if var_type:
+                    return {
+                        'name': base_name,
+                        'access_type': 'read',
+                        'position': ts_node.start_byte,
+                        'variable_type': var_type
+                    }
+                
+        except Exception:
+            pass
+            
+        return None
+    
+    def _analyze_index_access(self, ts_node, parent_context: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Analyze index access expressions like balances[user]."""
+        try:
+            # Find the base identifier (what's being indexed)
+            base_node = None
+            for child in ts_node.children:
+                if child.type == "identifier":
+                    base_node = child
+                    break
+                    
+            if not base_node:
+                return None
+                
+            var_name = base_node.text.decode('utf-8') if base_node.text else None
+            if not var_name:
+                return None
+                
+            # Classify the variable type
+            var_type = self._classify_variable_type(var_name, 'index_access')
+            if not var_type:
+                return None
+                
+            access_type = self._determine_access_type(ts_node)
+            
+            return {
+                'name': var_name,
+                'access_type': access_type,
+                'position': base_node.start_byte,
+                'variable_type': var_type
+            }
+            
+        except Exception:
+            pass
+            
+        return None
+    
+    def _classify_variable_type(self, var_name: str, context: Optional[str]) -> Optional[str]:
+        """Classify variable type based on name and context."""
+        # All variables that make it to this point are likely state variables
+        # (since we've filtered out keywords, types, and built-ins)
+        
+        # Additional filtering based on common patterns
+        if len(var_name) <= 2:  # Very short names are usually parameters
+            return None
+            
+        # Context-based classification
+        if context == 'index_access':
+            # Variables being indexed (e.g., balances[user]) are state variables
+            return 'state_variable'
+        elif context == 'member_access':
+            # Member access base objects (e.g., contract.method) could be contract references
+            return 'state_variable'
+        else:
+            # Default: assume it's a state variable if we got this far
+            return 'state_variable'
+    
+    def _determine_access_type(self, ts_node) -> str:
+        """Determine if this is a read or write access."""
+        # Walk up the parent chain to see if this is part of an assignment
+        parent = ts_node.parent
+        while parent:
+            if parent.type == "assignment_operator":
+                # Check if our node is on the left side (write) or right side (read)
+                for i, child in enumerate(parent.children):
+                    if self._node_contains(child, ts_node):
+                        return 'write' if i == 0 else 'read'
+            elif parent.type in ["variable_declaration", "state_variable_declaration"]:
+                return 'write'
+            parent = parent.parent
+            
+        return 'read'
+    
+    def _node_contains(self, ancestor, descendant) -> bool:
+        """Check if ancestor node contains descendant node."""
+        return (ancestor.start_byte <= descendant.start_byte and 
+                ancestor.end_byte >= descendant.end_byte)
 
     def _get_node_events(self, node: ASTNode) -> List[Dict[str, Any]]:
-        """Get events emitted by a node."""
+        """Get events emitted by a node using AST analysis."""
         events = []
-        source = getattr(node, 'source_code', '')
+        
+        if not hasattr(node, 'raw_node') or not node.raw_node:
+            return events
 
-        if source:
-            # Extract emit statements
-            emit_pattern = r'emit\s+(\w+)\s*\('
-            matches = re.finditer(emit_pattern, source)
+        def find_emit_statements(ts_node):
+            """Recursively find emit statements in the AST."""
+            if not ts_node:
+                return
+                
+            node_type = ts_node.type
+            
+            # Look for emit statements
+            if node_type == "emit_statement":
+                # Find the event name being emitted
+                for child in ts_node.children:
+                    if child.type == "call_expression":
+                        # Find the event identifier
+                        for call_child in child.children:
+                            if call_child.type == "identifier":
+                                event_name = call_child.text.decode('utf-8') if call_child.text else None
+                                if event_name:
+                                    events.append({
+                                        'name': event_name,
+                                        'position': call_child.start_byte
+                                    })
+                                break
+                        break
+                        
+            # Also look for emit keyword followed by call expressions
+            elif node_type == "identifier" and ts_node.text and ts_node.text.decode('utf-8') == "emit":
+                # Check if the next sibling is a call expression
+                parent = ts_node.parent
+                if parent:
+                    found_emit = False
+                    for child in parent.children:
+                        if child == ts_node:
+                            found_emit = True
+                        elif found_emit and child.type == "call_expression":
+                            # Extract event name from the call
+                            for call_child in child.children:
+                                if call_child.type == "identifier":
+                                    event_name = call_child.text.decode('utf-8') if call_child.text else None
+                                    if event_name:
+                                        events.append({
+                                            'name': event_name,
+                                            'position': call_child.start_byte
+                                        })
+                                    break
+                            break
+            
+            # Recursively check children
+            for child in ts_node.children:
+                find_emit_statements(child)
 
-            for match in matches:
-                event_name = match.group(1)
-                events.append({
-                    'name': event_name,
-                    'position': match.start()
-                })
-
+        find_emit_statements(node.raw_node)
         return events
 
     def _get_node_natspec(self, node: ASTNode) -> Dict[str, Any]:
@@ -1786,23 +2268,53 @@ class SolidityQueryEngineV2:
         }
 
     def _get_node_dependencies(self, node: ASTNode) -> List[str]:
-        """Get dependencies of a node."""
+        """Get dependencies of a node using AST analysis."""
         dependencies = []
-        source = getattr(node, 'source_code', '')
+        
+        if not hasattr(node, 'raw_node') or not node.raw_node:
+            return dependencies
 
-        if source:
-            # Extract import-like dependencies
-            import_patterns = [
-                r'import\s+["\']([^"\']*)["\'\s;]',
-                r'using\s+(\w+)\s+for',
-                r'\binherits\s+(\w+)',
-                r'\bimplements\s+(\w+)'
-            ]
+        def find_dependencies(ts_node):
+            """Recursively find dependencies in the AST."""
+            if not ts_node:
+                return
+                
+            node_type = ts_node.type
+            
+            # Look for import statements
+            if node_type == "import_directive":
+                for child in ts_node.children:
+                    if child.type == "string":
+                        import_path = child.text.decode('utf-8').strip('"\'') if child.text else None
+                        if import_path:
+                            dependencies.append(import_path)
+                            
+            # Look for using directives
+            elif node_type == "using_for_directive":
+                for child in ts_node.children:
+                    if child.type == "identifier":
+                        library_name = child.text.decode('utf-8') if child.text else None
+                        if library_name:
+                            dependencies.append(library_name)
+                            break
+                            
+            # Look for inheritance
+            elif node_type == "inheritance_specifier":
+                for child in ts_node.children:
+                    if child.type == "user_defined_type":
+                        # Get the inherited contract name
+                        for type_child in child.children:
+                            if type_child.type == "identifier":
+                                base_contract = type_child.text.decode('utf-8') if type_child.text else None
+                                if base_contract:
+                                    dependencies.append(base_contract)
+                                    break
+            
+            # Recursively check children
+            for child in ts_node.children:
+                find_dependencies(child)
 
-            for pattern in import_patterns:
-                matches = re.findall(pattern, source)
-                dependencies.extend(matches)
-
+        find_dependencies(node.raw_node)
         return list(set(dependencies))  # Remove duplicates
 
     def _get_inheritance_details(self, node: ContractDeclaration) -> Dict[str, Any]:

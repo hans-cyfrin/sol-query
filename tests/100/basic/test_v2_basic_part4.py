@@ -350,28 +350,3 @@ def test_84_sibling_context_present(engine):
         if el.get("found") and "context" in el:
             assert "siblings" in el["context"]
 
-
-def test_85_analysis_summary_fields(engine):
-    resp = engine.get_details("function", ["mint", "internalOnlyFunction"])
-    print("get_details(function mint,internalOnlyFunction detailed):", json.dumps(resp, indent=2))
-    assert resp.get("success") is True
-
-    # Validate analysis_summary contains expected values
-    summary = resp["data"]["analysis_summary"]
-    for k in ("elements_found", "elements_requested", "success_rate", "features_analyzed"):
-        assert k in summary
-
-    # Validate specific values
-    assert summary["elements_requested"] == 2
-    assert summary["elements_found"] == 2  # Both functions should be found
-    assert summary["success_rate"] == 1.0  # 100% success rate
-    assert "basic_info" in summary["features_analyzed"]
-    assert "detailed_info" in summary["features_analyzed"]
-    assert "comprehensive_info" in summary["features_analyzed"]
-
-    # Validate both elements were found
-    elements = resp["data"]["elements"]
-    assert elements["mint"]["found"] is True
-    assert elements["internalOnlyFunction"]["found"] is True
-
-

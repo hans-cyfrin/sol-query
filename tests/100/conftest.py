@@ -1,72 +1,51 @@
-import os
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+"""
+Shared test configuration for all 100-test files.
+Provides common fixtures to avoid repetition across test files.
 
+This conftest.py file implements DRY (Don't Repeat Yourself) principle by providing
+shared fixtures that all test files can use instead of defining the same fixture
+multiple times across different test files.
+"""
 import pytest
-
 from sol_query.query.engine_v2 import SolidityQueryEngineV2
 
 
 @pytest.fixture(scope="session")
-def fixtures_root() -> Path:
-    return Path(__file__).resolve().parents[1] / "fixtures"
-
-
-@pytest.fixture(scope="session")
-def engine(fixtures_root: Path) -> SolidityQueryEngineV2:
+def engine():
+    """
+    Session-scoped engine fixture shared across all test files.
+    
+    Initializes the SolidityQueryEngineV2 once per test session and loads
+    all test fixtures. This is more efficient than creating a new engine
+    for each test function since loading sources is expensive.
+    
+    The fixture loads:
+    - tests/fixtures/composition_and_imports/ (contracts with imports/inheritance)
+    - tests/fixtures/detailed_scenarios/ (complex real-world scenarios) 
+    - tests/fixtures/sample_contract.sol (basic test contract)
+    
+    Returns:
+        SolidityQueryEngineV2: Configured engine ready for testing
+    """
     engine = SolidityQueryEngineV2()
-    # Prefer absolute paths
-    sources: List[os.PathLike] = [
-        fixtures_root / "composition_and_imports",
-        fixtures_root / "detailed_scenarios",
-        fixtures_root / "sample_contract.sol",
-    ]
-    engine.load_sources([str(p) for p in sources])
+    engine.load_sources([
+        "tests/fixtures/composition_and_imports/",
+        "tests/fixtures/detailed_scenarios/",
+        "tests/fixtures/sample_contract.sol",
+    ])
     return engine
 
 
-def assert_success_response(resp: Dict[str, Any]) -> None:
-    assert isinstance(resp, dict)
-    assert resp.get("success") in (True, False)
-    # query_info must exist and be well-formed
-    q = resp.get("query_info", {})
-    assert "function" in q
-    assert "parameters" in q
-
-
-def assert_query_results_shape(resp: Dict[str, Any], expected_type: Optional[str] = None) -> List[Dict[str, Any]]:
-    assert_success_response(resp)
-    assert resp.get("success") is True
-    data = resp.get("data")
-    assert isinstance(data, dict)
-    results = data.get("results")
-    assert isinstance(results, list)
-    # Summary presence
-    summary = data.get("summary")
-    assert isinstance(summary, dict)
-    assert "total_count" in summary
-    # Optional type check
-    if expected_type is not None and len(results) > 0:
-        for item in results:
-            assert item.get("type") == expected_type
-    return results
-
-
-def assert_includes_fields_if_present(item: Dict[str, Any], fields: List[str]) -> None:
-    for f in fields:
-        assert f in item
-
-
-def assert_if_non_empty_all(results: List[Dict[str, Any]], predicate) -> None:
-    if results:
-        for r in results:
-            assert predicate(r)
-
-
-def ensure_location_present(results: List[Dict[str, Any]]) -> None:
-    for r in results:
-        loc = r.get("location", {})
-        assert "file" in loc
-        assert "contract" in loc
-
-
+@pytest.fixture(scope="function")
+def fresh_engine():
+    """
+    Function-scoped engine fixture for tests that need a clean engine instance.
+    Creates a new engine for each test function.
+    """
+    engine = SolidityQueryEngineV2()
+    engine.load_sources([
+        "tests/fixtures/composition_and_imports/",
+        "tests/fixtures/detailed_scenarios/",
+        "tests/fixtures/sample_contract.sol",
+    ])
+    return engine

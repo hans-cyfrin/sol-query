@@ -170,12 +170,7 @@ class SolidityQueryEngineV2:
                 "data": result_data,
                 "metadata": {
                     "analysis_scope": self._get_analysis_scope(scope),
-                    "filters_applied": filters,
-                    "performance": {
-                        "nodes_analyzed": len(self._get_all_nodes()),
-                        "files_processed": len(self.source_manager.files),
-                        "memory_usage": "N/A"
-                    },
+                    "filters_applied": filters
                 },
                 "warnings": [],
                 "errors": []
@@ -254,16 +249,10 @@ class SolidityQueryEngineV2:
                     "cache_hit": False
                 },
                 "data": {
-                    "elements": analysis_results,
-                    "analysis_summary": self._create_analysis_summary(analysis_results)
+                    "elements": analysis_results
                 },
                 "metadata": {
-                    "analysis_scope": {"element_type": element_type, "identifiers": identifiers},
-                    "performance": {
-                        "elements_analyzed": len(identifiers),
-                        "files_processed": len(self.source_manager.files),
-                        "memory_usage": "N/A"
-                    }
+                    "analysis_scope": {"element_type": element_type, "identifiers": identifiers}
                 },
                 "warnings": [],
                 "errors": []
@@ -359,12 +348,7 @@ class SolidityQueryEngineV2:
                         "max_depth": max_depth,
                         "direction": direction
                     },
-                    "filters_applied": filters,
-                    "performance": {
-                        "references_found": len(references.get("references", [])),
-                        "depth_reached": references.get("max_depth_reached", 0),
-                        "files_analyzed": len(self.source_manager.files)
-                    }
+                    "filters_applied": filters
                 },
                 "warnings": [],
                 "errors": []
@@ -1505,12 +1489,7 @@ class SolidityQueryEngineV2:
             "data": None,
             "metadata": {
                 "analysis_scope": {},
-                "filters_applied": {},
-                "performance": {
-                    "references_found": 0,
-                    "depth_reached": 0,
-                    "files_analyzed": 0
-                }
+                "filters_applied": {}
             },
             "warnings": [],
             "errors": formatted_errors,
@@ -2551,20 +2530,6 @@ class SolidityQueryEngineV2:
                 distribution[visibility] = distribution.get(visibility, 0) + 1
         return distribution
 
-    def _create_analysis_summary(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Create summary of analysis results."""
-        found_count = len([r for r in analysis_results.values() if r.get("found", True)])
-
-        # Features always analyzed in comprehensive mode
-        features_analyzed = ["basic_info", "detailed_info", "comprehensive_info", "dependencies", "call_graphs", "data_flow"]
-
-        return {
-            "elements_found": found_count,
-            "elements_requested": len(analysis_results),
-            "success_rate": found_count / len(analysis_results) if analysis_results else 0,
-            "features_analyzed": features_analyzed,
-            "total_analysis_points": len(features_analyzed) * found_count
-        }
 
     def _get_target_info(self, element: ASTNode, target_type: str) -> Dict[str, Any]:
         """Get information about the target element."""

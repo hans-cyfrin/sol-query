@@ -602,29 +602,48 @@ class EmitStatement(Statement):
         return []
 
 
-class GenericStatement(Statement):
-    """Represents a generic statement with configurable node type."""
+# Extracted statement for query engine use
+class ExtractedStatement(Statement):
+    """Represents a statement extracted from function/modifier bodies for query purposes."""
 
     node_type: NodeType = Field(description="Type of this statement")
+    parent_function: Optional["FunctionDeclaration"] = Field(
+        default=None,
+        description="Reference to the parent function",
+        exclude=True  # Exclude from serialization to avoid circular references
+    )
 
     def __init__(self, node_type: NodeType = NodeType.STATEMENT, **kwargs):
         super().__init__(node_type=node_type, **kwargs)
 
     def get_children(self) -> List[ASTNode]:
-        """Get child nodes including nested expressions."""
-        children = []
-
-        # Include any nested expressions stored during building
-        if hasattr(self, '_nested_expressions'):
-            children.extend(self._nested_expressions)
-
-        return children
+        """Get child nodes."""
+        return []
 
 
 # Expression classes
 class Expression(ASTNode):
     """Base class for all expressions."""
     pass
+
+
+# Extracted expression for query engine use
+class ExtractedExpression(Expression):
+    """Represents an expression extracted from function bodies for query purposes."""
+
+    node_type: NodeType = Field(description="Type of this expression")
+    parent_function: Optional["FunctionDeclaration"] = Field(
+        default=None,
+        description="Reference to the parent function",
+        exclude=True  # Exclude from serialization to avoid circular references
+    )
+
+    def __init__(self, node_type: NodeType = NodeType.IDENTIFIER, **kwargs):
+        super().__init__(node_type=node_type, **kwargs)
+
+    def get_children(self) -> List[ASTNode]:
+        """Get child nodes."""
+        return []
 
 
 class Identifier(Expression):

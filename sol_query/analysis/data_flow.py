@@ -8,7 +8,7 @@ from enum import Enum
 from sol_query.core.ast_nodes import (
     ASTNode, Statement, Expression, FunctionDeclaration, VariableDeclaration,
     Identifier, CallExpression, BinaryExpression,
-    ReturnStatement, ExpressionStatement, GenericStatement
+    ReturnStatement, ExpressionStatement
 )
 
 
@@ -211,11 +211,7 @@ class DataFlowAnalyzer:
 
     def _analyze_statement(self, statement: Statement, graph: DataFlowGraph):
         """Analyze a single statement for data flow."""
-        if isinstance(statement, ExpressionStatement):
-            # Analyze the contained expression
-            if hasattr(statement, 'expression') and statement.expression:
-                self._analyze_expression(statement.expression, graph)
-        elif isinstance(statement, VariableDeclaration):
+        if isinstance(statement, VariableDeclaration):
             # Variable declaration - track as a write point
             if hasattr(statement, 'name') and statement.name:
                 # The declaration itself is a write
@@ -230,9 +226,13 @@ class DataFlowAnalyzer:
                 # If there's an initial value, analyze it and create a flow edge
                 if hasattr(statement, 'initial_value') and statement.initial_value:
                     self._analyze_expression(statement.initial_value, graph)
-        elif isinstance(statement, GenericStatement):
-            # Handle generic statements - many variable declarations appear as these
+        elif isinstance(statement, ExpressionStatement):
+            # First, handle generic patterns (e.g., local variable declarations)
             self._analyze_generic_statement(statement, graph)
+
+            # Then, analyze the contained expression if present
+            if hasattr(statement, 'expression') and statement.expression:
+                self._analyze_expression(statement.expression, graph)
         elif isinstance(statement, CallExpression):
             self._analyze_call(statement, graph)
         elif isinstance(statement, ReturnStatement):
@@ -250,7 +250,7 @@ class DataFlowAnalyzer:
         if hasattr(statement, 'expression') and statement.expression:
             self._analyze_expression(statement.expression, graph)
 
-    def _analyze_generic_statement(self, statement: GenericStatement, graph: DataFlowGraph):
+    def _analyze_generic_statement(self, statement: ExpressionStatement, graph: DataFlowGraph):
         """Analyze a generic statement which might contain variable declarations."""
         source = statement.get_source_code()
 

@@ -14,8 +14,10 @@ from sol_query.core.source_manager import SourceManager
 from sol_query.core.ast_nodes import (
     ASTNode, ContractDeclaration, FunctionDeclaration, VariableDeclaration,
     ModifierDeclaration, EventDeclaration, ErrorDeclaration, StructDeclaration,
-    EnumDeclaration, Statement, Expression
+    EnumDeclaration, Statement, Expression, ExtractedStatement, ExtractedExpression,
+    NodeType
 )
+from sol_query.models.source_location import SourceLocation
 from sol_query.utils.pattern_matching import PatternMatcher
 from sol_query.analysis.call_analyzer import CallAnalyzer
 from sol_query.analysis.variable_tracker import VariableTracker
@@ -33,18 +35,18 @@ class SolidityQueryEngineV2:
         """Initialize the V2 query engine."""
         self.source_manager = SourceManager()
         self.pattern_matcher = PatternMatcher()
-        
+
         # Setup logging
         self.logger = logging.getLogger(__name__)
-        
+
         # Initialize existing sophisticated analyzers
         self.call_analyzer = CallAnalyzer()
         self.variable_tracker = VariableTracker()
-        
+
         # Performance optimization: cache frequently accessed data
         self._all_nodes_cache = None
         self._nodes_by_type_cache = {}
-        
+
         if source_paths:
             self.load_sources(source_paths)
 
@@ -52,7 +54,7 @@ class SolidityQueryEngineV2:
         """Get all AST nodes from all source files with caching."""
         if self._all_nodes_cache is not None:
             return self._all_nodes_cache
-        
+
         all_nodes = []
 
         # Get contracts (these are available directly)
@@ -61,7 +63,7 @@ class SolidityQueryEngineV2:
 
         # Extract nested elements from contracts using attribute mapping for performance
         nested_attributes = ['functions', 'variables', 'events', 'modifiers', 'errors', 'structs', 'enums']
-        
+
         for contract in contracts:
             for attr in nested_attributes:
                 if hasattr(contract, attr):
@@ -87,10 +89,10 @@ class SolidityQueryEngineV2:
                 self.source_manager.add_file(path)
             elif path.is_dir():
                 self.source_manager.add_directory(path, recursive=True)
-        
+
         # Invalidate caches after loading new sources
         self._invalidate_caches()
-    
+
     def _invalidate_caches(self) -> None:
         """Invalidate all internal caches."""
         self._all_nodes_cache = None
@@ -553,9 +555,85 @@ class SolidityQueryEngineV2:
         elif query_type == "enums":
             return [node for node in all_nodes if isinstance(node, EnumDeclaration)]
         elif query_type == "statements":
-            return [node for node in all_nodes if isinstance(node, Statement)]
+            # Extract statements from function and modifier bodies using AST traversal
+            statements = []
+            functions_and_modifiers = [node for node in all_nodes if isinstance(node, (FunctionDeclaration, ModifierDeclaration))]
+            for func in functions_and_modifiers:
+                if hasattr(func, 'raw_node') and func.raw_node:
+                    func_statements = self._get_node_statements(func)
+                    # Convert dictionary statements to proper AST nodes
+                    for stmt_data in func_statements:
+                        source_loc = SourceLocation(
+                            file_path=func.source_location.file_path,
+                            start_line=stmt_data['source_location']['line'],
+                            start_column=stmt_data['source_location']['column'],
+                            end_line=stmt_data['source_location']['line'],
+                            end_column=stmt_data['source_location']['column'] + 10,
+                            start_byte=stmt_data['source_location']['start_byte'],
+                            end_byte=stmt_data['source_location']['end_byte'],
+                            source_text=stmt_data.get('source_text', '')
+                        )
+
+                        # Map statement types to NodeType enums
+                        stmt_type_map = {
+                            "return_statement": NodeType.RETURN_STATEMENT,
+                            "emit_statement": NodeType.EMIT_STATEMENT,
+                            "expression_statement": NodeType.EXPRESSION_STATEMENT,
+                            "if_statement": NodeType.IF_STATEMENT,
+                            "for_statement": NodeType.FOR_STATEMENT,
+                            "while_statement": NodeType.WHILE_STATEMENT,
+                        }
+
+                        node_type = stmt_type_map.get(stmt_data.get('type', ''), NodeType.STATEMENT)
+
+                        stmt_node = ExtractedStatement(
+                            node_type=node_type,
+                            source_location=source_loc
+                        )
+                        stmt_node.parent_function = func
+                        statements.append(stmt_node)
+            return statements
         elif query_type == "expressions":
-            return [node for node in all_nodes if isinstance(node, Expression)]
+            # Extract expressions from function bodies using AST traversal
+            expressions = []
+            functions = [node for node in all_nodes if isinstance(node, FunctionDeclaration)]
+            for func in functions:
+                if hasattr(func, 'raw_node') and func.raw_node:
+                    func_expressions = self._get_node_expressions(func)
+                    # Convert dictionary expressions to proper AST nodes
+                    for expr_data in func_expressions:
+                        source_loc = SourceLocation(
+                            file_path=func.source_location.file_path,
+                            start_line=expr_data['source_location']['line'],
+                            start_column=expr_data['source_location']['column'],
+                            end_line=expr_data['source_location']['line'],
+                            end_column=expr_data['source_location']['column'] + 10,
+                            start_byte=expr_data['source_location']['start_byte'],
+                            end_byte=expr_data['source_location']['end_byte'],
+                            source_text=expr_data.get('source_text', '')
+                        )
+
+                        # Map expression types to NodeType enums
+                        expr_type_map = {
+                            "binary_expression": NodeType.BINARY_EXPRESSION,
+                            "call_expression": NodeType.CALL_EXPRESSION,
+                            "member_access_expression": NodeType.MEMBER_ACCESS,
+                            "identifier": NodeType.IDENTIFIER,
+                            "literal": NodeType.LITERAL,
+                            "assignment_expression": NodeType.ASSIGNMENT_EXPRESSION,
+                            "array_access": NodeType.ARRAY_ACCESS,
+                            "unary_expression": NodeType.UNARY_EXPRESSION,
+                        }
+
+                        node_type = expr_type_map.get(expr_data.get('type', ''), NodeType.IDENTIFIER)
+
+                        expr_node = ExtractedExpression(
+                            node_type=node_type,
+                            source_location=source_loc
+                        )
+                        expr_node.parent_function = func
+                        expressions.append(expr_node)
+            return expressions
         elif query_type == "calls":
             # Extract calls from function bodies using AST analysis
             calls = []
@@ -575,12 +653,13 @@ class SolidityQueryEngineV2:
                                 self.line_number = call_data.get('line', 0)
                                 self.column = call_data.get('column', 0)
                                 self.parent_function = getattr(func, 'name', None)
-                                self.contract = getattr(func, 'contract', None)
-                                self.file_path = getattr(func, 'file_path', None)
-                                
+                                self.parent_contract = getattr(func, 'parent_contract', None)
+                                self.contract = getattr(self.parent_contract, 'name', None) if self.parent_contract else None
+                                self.source_location = getattr(func, 'source_location', None)
+
                             def __str__(self):
                                 return self.name
-                                
+
                         call_node = CallNode(call, func)
                         calls.append(call_node)
             return calls
@@ -710,16 +789,18 @@ class SolidityQueryEngineV2:
         if isinstance(visibility_values, str):
             visibility_values = [visibility_values]
 
-        return [n for n in nodes if hasattr(n, 'visibility') and str(n.visibility).lower() in
-                [v.lower() for v in visibility_values]]
+        normalized_values = [v.lower() for v in visibility_values]
+        return [n for n in nodes if hasattr(n, 'visibility') and
+                (n.visibility.value.lower() if hasattr(n.visibility, 'value') else str(n.visibility).lower()) in normalized_values]
 
     def _filter_by_state_mutability(self, nodes: List[ASTNode], mutability_values: Union[str, List[str]]) -> List[ASTNode]:
         """Filter nodes by state mutability."""
         if isinstance(mutability_values, str):
             mutability_values = [mutability_values]
 
-        return [n for n in nodes if hasattr(n, 'state_mutability') and str(n.state_mutability).lower() in
-                [m.lower() for m in mutability_values]]
+        normalized_values = [m.lower() for m in mutability_values]
+        return [n for n in nodes if hasattr(n, 'state_mutability') and
+                (n.state_mutability.value.lower() if hasattr(n.state_mutability, 'value') else str(n.state_mutability).lower()) in normalized_values]
 
     def _filter_by_modifiers(self, nodes: List[ASTNode], modifier_patterns: Union[str, List[str]]) -> List[ASTNode]:
         """Filter nodes by modifier patterns."""
@@ -728,11 +809,17 @@ class SolidityQueryEngineV2:
 
         # Empty list means no modifiers
         if not modifier_patterns:
-            return [n for n in nodes if not hasattr(n, 'modifiers') or not n.modifiers]
+            filtered: List[ASTNode] = []
+            for n in nodes:
+                # Only functions can have modifiers here
+                if isinstance(n, FunctionDeclaration):
+                    if not getattr(n, 'modifiers', []):
+                        filtered.append(n)
+            return filtered
 
         filtered = []
         for node in nodes:
-            if hasattr(node, 'modifiers') and node.modifiers:
+            if isinstance(node, FunctionDeclaration) and getattr(node, 'modifiers', []):
                 for pattern in modifier_patterns:
                     if any(self._matches_pattern(str(mod), pattern) for mod in node.modifiers):
                         filtered.append(node)
@@ -759,15 +846,15 @@ class SolidityQueryEngineV2:
             """Recursively traverse tree-sitter nodes to find external calls."""
             if not ts_node:
                 return False
-                
+
             node_type = ts_node.type
-            
+
             # Check for call expressions
             if node_type == "call_expression":
                 call_info = self._analyze_call_expression(ts_node)
                 if call_info and call_info.get('type') in ['external', 'low_level']:
                     return True
-                    
+
             # Check for member access that might be external calls
             elif node_type == "member_access":
                 member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
@@ -778,18 +865,18 @@ class SolidityQueryEngineV2:
                     # Check for external contract calls (exclude builtins)
                     builtin_members = {
                         'msg.sender', 'msg.value', 'msg.data', 'msg.sig',
-                        'block.timestamp', 'block.number', 'block.coinbase', 
+                        'block.timestamp', 'block.number', 'block.coinbase',
                         'tx.origin', 'tx.gasprice'
                     }
                     if '.' in member_text and member_text not in builtin_members:
                         # This could be an external contract call
                         return True
-            
+
             # Recursively check children
             for child in ts_node.children:
                 if check_for_external_calls(child):
                     return True
-                    
+
             return False
 
         return check_for_external_calls(node.raw_node)
@@ -814,21 +901,21 @@ class SolidityQueryEngineV2:
             """Recursively traverse tree-sitter nodes to find state changes."""
             if not ts_node:
                 return False
-                
+
             node_type = ts_node.type
-            
+
             # Check for assignment operations
-            if node_type == "assignment_operator":
+            if node_type in ["assignment_operator", "assignment_expression"]:
                 return True
-                
+
             # Check for compound assignments (+=, -=, *=, /=)
             elif node_type in ["augmented_assignment_operator", "compound_assignment"]:
                 return True
-                
+
             # Check for update expressions (++, --)
             elif node_type in ["update_expression", "unary_expression"]:
                 return self._is_update_expression(ts_node)
-                    
+
             # Check for function calls that modify state
             elif node_type == "call_expression":
                 call_info = self._analyze_call_expression(ts_node)
@@ -838,7 +925,7 @@ class SolidityQueryEngineV2:
                     state_modifying_calls = {'push', 'pop', 'delete', 'transfer', 'send'}
                     if any(method in call_name for method in state_modifying_calls):
                         return True
-                        
+
             # Check for member access assignments (e.g., balances[user] = amount)
             elif node_type == "index_access":
                 # Check if this index access is on the left side of an assignment
@@ -847,22 +934,22 @@ class SolidityQueryEngineV2:
                     # Check if this is the left operand
                     if parent.children and parent.children[0] == ts_node:
                         return True
-                        
+
             # Check for delete statements
             elif node_type == "delete_statement":
                 return True
-                
+
             # Check for storage variable declarations with assignments
             elif node_type == "variable_declaration":
                 var_text = ts_node.text.decode('utf-8') if ts_node.text else ''
                 if 'storage' in var_text and '=' in var_text:
                     return True
-            
+
             # Recursively check children
             for child in ts_node.children:
                 if check_for_state_changes(child):
                     return True
-                    
+
             return False
 
         return check_for_state_changes(node.raw_node)
@@ -890,8 +977,8 @@ class SolidityQueryEngineV2:
             # Add basic node-specific info
             if isinstance(node, FunctionDeclaration):
                 result_item.update({
-                    "visibility": str(getattr(node, 'visibility', '')),
-                    "state_mutability": str(getattr(node, 'state_mutability', '')),
+                    "visibility": getattr(node, 'visibility', None).value if hasattr(getattr(node, 'visibility', None), 'value') else (str(getattr(node, 'visibility', '')) or None),
+                    "state_mutability": getattr(node, 'state_mutability', None).value if hasattr(getattr(node, 'state_mutability', None), 'value') else (str(getattr(node, 'state_mutability', '')) or None),
                     "signature": node.get_signature() if hasattr(node, 'get_signature') else None
                 })
             elif isinstance(node, ContractDeclaration):
@@ -902,8 +989,8 @@ class SolidityQueryEngineV2:
             elif isinstance(node, VariableDeclaration):
                 result_item.update({
                     "type_name": str(getattr(node, 'type_name', '')),
-                    "visibility": str(getattr(node, 'visibility', '')),
-                    "is_state_variable": getattr(node, 'is_state_variable', False)
+                    "visibility": getattr(node, 'visibility', None).value if hasattr(getattr(node, 'visibility', None), 'value') else (str(getattr(node, 'visibility', '')) or None),
+                    "is_state_variable": (node.is_state_variable() if hasattr(node, 'is_state_variable') and callable(getattr(node, 'is_state_variable')) else (getattr(node, 'visibility', None) is not None))
                 })
 
             # Add included data
@@ -969,7 +1056,7 @@ class SolidityQueryEngineV2:
         # Check cache first
         if element_type in self._nodes_by_type_cache:
             return self._nodes_by_type_cache[element_type]
-        
+
         # Compute result
         if element_type == "function":
             all_nodes = self._get_all_nodes()
@@ -996,7 +1083,7 @@ class SolidityQueryEngineV2:
             result = [node for node in all_nodes if isinstance(node, EnumDeclaration)]
         else:
             result = []
-        
+
         # Cache and return
         self._nodes_by_type_cache[element_type] = result
         return result
@@ -1133,8 +1220,8 @@ class SolidityQueryEngineV2:
 
         return element
 
-    def _find_element_references(self, target_element: ASTNode, 
-                               reference_type: str, direction: str, 
+    def _find_element_references(self, target_element: ASTNode,
+                               reference_type: str, direction: str,
                                max_depth: int, filters: Dict[str, Any],
                                options: Dict[str, Any]) -> Dict[str, Any]:
         """Find references to an element."""
@@ -1426,19 +1513,30 @@ class SolidityQueryEngineV2:
 
     def _get_node_location(self, node: ASTNode) -> Dict[str, Any]:
         """Get location information for a node."""
-        # Get contract name depending on node type
+        # Derive contract name from parent_contract when available
         contract_name = None
-        if isinstance(node, FunctionDeclaration) and hasattr(node, 'parent_contract') and node.parent_contract:
+        if isinstance(node, FunctionDeclaration) and getattr(node, 'parent_contract', None):
             contract_name = getattr(node.parent_contract, 'name', None)
         elif isinstance(node, ContractDeclaration):
             contract_name = getattr(node, 'name', None)
-        elif hasattr(node, 'contract'):
-            contract_name = getattr(node, 'contract', None)
-            
+
+        # Use SourceLocation when available
+        file_path = None
+        line = None
+        column = None
+        if hasattr(node, 'source_location') and getattr(node, 'source_location') is not None:
+            try:
+                loc = node.source_location
+                file_path = getattr(loc, 'file_path', None)
+                line = getattr(loc, 'start_line', None)
+                column = getattr(loc, 'start_column', None)
+            except Exception:
+                pass
+
         return {
-            "file": getattr(node, 'file_path', None),
-            "line": getattr(node, 'line_number', None),
-            "column": getattr(node, 'column', None),
+            "file": file_path,
+            "line": line,
+            "column": column,
             "contract": contract_name
         }
 
@@ -1516,19 +1614,19 @@ class SolidityQueryEngineV2:
                 f"Use {function_name}() with broader filters to understand project structure"
             ]
         }
-    
-    def _handle_exception(self, function_name: str, parameters: Dict[str, Any], 
+
+    def _handle_exception(self, function_name: str, parameters: Dict[str, Any],
                          exception: Exception, context: str = "") -> Dict[str, Any]:
         """Handle exceptions with consistent logging and error response."""
         error_msg = f"Error in {function_name}: {str(exception)}"
         if context:
             error_msg += f" (Context: {context})"
-            
+
         self.logger.error(error_msg, exc_info=True)
-        
+
         return self._create_error_response(
-            function_name, 
-            parameters, 
+            function_name,
+            parameters,
             [f"Internal error: {str(exception)}"]
         )
 
@@ -1538,7 +1636,14 @@ class SolidityQueryEngineV2:
         if not contract_names:
             return True
 
-        node_contract = getattr(node, 'contract', None)
+        # Determine contract name
+        node_contract = None
+        if isinstance(node, ContractDeclaration):
+            node_contract = getattr(node, 'name', None)
+        elif isinstance(node, FunctionDeclaration) and getattr(node, 'parent_contract', None):
+            node_contract = getattr(node.parent_contract, 'name', None)
+        elif hasattr(node, 'parent_contract') and getattr(node, 'parent_contract', None):
+            node_contract = getattr(node.parent_contract, 'name', None)
         if not node_contract:
             return False
 
@@ -1552,20 +1657,28 @@ class SolidityQueryEngineV2:
         if not function_names:
             return True
 
-        # Check if node is a function itself
+        # If the node itself is a function
         if isinstance(node, FunctionDeclaration):
             node_name = getattr(node, 'name', None)
             if node_name:
-                for func_name in function_names:
-                    if self._matches_pattern(node_name, func_name):
-                        return True
+                # For function scope filtering, use exact matches
+                return node_name in function_names
 
-        # Check if node is within a function
-        node_function = getattr(node, 'function', None)
-        if node_function:
-            for func_name in function_names:
-                if self._matches_pattern(node_function, func_name):
-                    return True
+        # Special handling: for variable declarations, allow filtering by usage in matching functions
+        if isinstance(node, VariableDeclaration):
+            var_name = getattr(node, 'name', None)
+            parent_contract = getattr(node, 'parent_contract', None)
+            if var_name and parent_contract:
+                # Find functions in the same contract matching the patterns and check if they reference the variable name
+                for func in getattr(parent_contract, 'functions', []) or []:
+                    for func_name in function_names:
+                        if self._matches_pattern(getattr(func, 'name', '') or '', func_name):
+                            try:
+                                src = func.get_source_code() if hasattr(func, 'get_source_code') else ''
+                            except Exception:
+                                src = ''
+                            if src and var_name in src:
+                                return True
 
         return False
 
@@ -1574,7 +1687,9 @@ class SolidityQueryEngineV2:
         if not file_patterns:
             return True
 
-        node_file = getattr(node, 'file_path', None)
+        node_file = None
+        if hasattr(node, 'source_location') and getattr(node, 'source_location') is not None:
+            node_file = getattr(node.source_location, 'file_path', None)
         if not node_file:
             return False
 
@@ -1589,7 +1704,9 @@ class SolidityQueryEngineV2:
         if not dir_patterns:
             return True
 
-        node_file = getattr(node, 'file_path', None)
+        node_file = None
+        if hasattr(node, 'source_location') and getattr(node, 'source_location') is not None:
+            node_file = getattr(node.source_location, 'file_path', None)
         if not node_file:
             return False
 
@@ -1606,6 +1723,12 @@ class SolidityQueryEngineV2:
             return base_contract in inheritance
 
         # For other nodes, check their contract's inheritance
+        # Check parent_contract attribute first (preferred approach)
+        if hasattr(node, 'parent_contract') and node.parent_contract:
+            inheritance = getattr(node.parent_contract, 'inheritance', [])
+            return base_contract in inheritance
+
+        # Fallback to contract attribute
         node_contract = getattr(node, 'contract', None)
         if node_contract:
             # Find the contract and check its inheritance
@@ -1624,7 +1747,12 @@ class SolidityQueryEngineV2:
 
         filtered = []
         for node in nodes:
+            # Check both contract and parent_contract attributes
             node_contract = getattr(node, 'contract', None)
+            if not node_contract:
+                parent_contract = getattr(node, 'parent_contract', None)
+                node_contract = getattr(parent_contract, 'name', None) if parent_contract else None
+
             if node_contract:
                 for pattern in contract_patterns:
                     if self._matches_pattern(node_contract, pattern):
@@ -1652,9 +1780,9 @@ class SolidityQueryEngineV2:
             """Recursively traverse tree-sitter nodes to find asset transfers."""
             if not ts_node:
                 return False
-                
+
             node_type = ts_node.type
-            
+
             # Check for function calls that might be asset transfers
             if node_type == "call_expression":
                 call_info = self._analyze_call_expression(ts_node)
@@ -1666,7 +1794,7 @@ class SolidityQueryEngineV2:
                     }
                     if any(func in call_name for func in transfer_functions):
                         return True
-                        
+
             # Check for member access that indicates asset transfers
             elif node_type == "member_access":
                 member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
@@ -1675,15 +1803,15 @@ class SolidityQueryEngineV2:
                     ether_transfer_methods = {'transfer', 'send'}
                     if any(f'.{method}' in member_text for method in ether_transfer_methods):
                         return True
-                        
+
             # Check for call expressions with value field (e.g., call{value: amount})
             elif node_type == "call_options":
                 # This indicates a call with options like {value: ...}
                 options_text = ts_node.text.decode('utf-8') if ts_node.text else ''
                 if 'value' in options_text.lower():
                     return True
-                    
-            # Check for payable cast expressions  
+
+            # Check for payable cast expressions
             elif node_type == "call_expression":
                 # Look for payable(...) patterns
                 for child in ts_node.children:
@@ -1691,12 +1819,12 @@ class SolidityQueryEngineV2:
                         func_name = child.text.decode('utf-8') if child.text else ''
                         if func_name == 'payable':
                             return True
-            
+
             # Recursively check children
             for child in ts_node.children:
                 if check_for_asset_transfers(child):
                     return True
-                    
+
             return False
 
         return check_for_asset_transfers(node.raw_node)
@@ -1705,8 +1833,16 @@ class SolidityQueryEngineV2:
         """Filter for payable functions."""
         filtered = []
         for node in nodes:
-            node_payable = (hasattr(node, 'state_mutability') and
-                          str(node.state_mutability).lower() == 'payable')
+            # Extract the enum value properly
+            if hasattr(node, 'state_mutability') and node.state_mutability:
+                if hasattr(node.state_mutability, 'value'):
+                    mutability_value = node.state_mutability.value.lower()
+                else:
+                    mutability_value = str(node.state_mutability).lower()
+                node_payable = mutability_value == 'payable'
+            else:
+                node_payable = False
+
             if node_payable == is_payable:
                 filtered.append(node)
         return filtered
@@ -1730,7 +1866,13 @@ class SolidityQueryEngineV2:
         """Filter for state variables."""
         filtered = []
         for node in nodes:
-            node_is_state = getattr(node, 'is_state_variable', False)
+            # Call the is_state_variable method if it exists, otherwise check visibility
+            if hasattr(node, 'is_state_variable') and callable(getattr(node, 'is_state_variable')):
+                node_is_state = node.is_state_variable()
+            else:
+                # Fallback: state variables typically have visibility
+                node_is_state = getattr(node, 'visibility', None) is not None
+
             if node_is_state == is_state:
                 filtered.append(node)
         return filtered
@@ -1742,9 +1884,26 @@ class SolidityQueryEngineV2:
 
         filtered = []
         for node in nodes:
-            node_type = getattr(node, 'statement_type', None) or type(node).__name__.lower()
+            # Get the node type from the node_type attribute (for ExtractedStatement) or class name
+            if hasattr(node, 'node_type') and node.node_type:
+                node_type = str(node.node_type).lower()
+            else:
+                node_type = type(node).__name__.lower()
+
+            # Get source text to check for specific statement content (like require, assert, etc.)
+            source_text = getattr(node, 'source_location', None)
+            if source_text and hasattr(source_text, 'source_text'):
+                source_text = source_text.source_text.lower()
+            else:
+                source_text = ""
+
             for stmt_type in statement_types:
-                if stmt_type.lower() in node_type:
+                stmt_type_lower = stmt_type.lower()
+                # Check both node type and source text content
+                if (stmt_type_lower in node_type or
+                    (stmt_type_lower in ["require", "assert", "revert"] and
+                     stmt_type_lower in source_text and
+                     source_text.strip().startswith(stmt_type_lower + "("))):
                     filtered.append(node)
                     break
         return filtered
@@ -1772,19 +1931,17 @@ class SolidityQueryEngineV2:
     def _filter_by_call_types(self, nodes: List[ASTNode], call_types: List[str]) -> List[ASTNode]:
         """Filter by call types using AST analysis."""
         filtered = []
+        lowered = [ct.lower() for ct in call_types]
         for node in nodes:
             # Get all calls made by this node
             calls = self._get_node_calls(node)
             for call in calls:
-                call_name = call.get('name', '').lower()
-                # Check if any call type matches
-                for call_type in call_types:
-                    if call_type.lower() in call_name:
+                call_name = call.get('name', '') or ''
+                call_type_val = (call.get('type', '') or '').lower()
+                # Match by explicit type (external, low_level, library) OR substring in name
+                if any(ct in call_type_val for ct in lowered) or any(ct in call_name.lower() for ct in lowered):
                         filtered.append(node)
                         break
-                else:
-                    continue
-                break
         return filtered
 
     def _filter_by_low_level_calls(self, nodes: List[ASTNode], is_low_level: bool) -> List[ASTNode]:
@@ -1805,31 +1962,41 @@ class SolidityQueryEngineV2:
 
     def _get_ast_info(self, node: ASTNode) -> Dict[str, Any]:
         """Get AST information for a node."""
+        start_line = None
+        end_line = None
+        column = None
+        if hasattr(node, 'source_location') and getattr(node, 'source_location') is not None:
+            try:
+                start_line = getattr(node.source_location, 'start_line', None)
+                end_line = getattr(node.source_location, 'end_line', None)
+                column = getattr(node.source_location, 'start_column', None)
+            except Exception:
+                pass
         return {
             "node_type": type(node).__name__,
             "node_id": getattr(node, 'id', None),
-            "start_line": getattr(node, 'line_number', None),
-            "end_line": getattr(node, 'end_line_number', None),
-            "column": getattr(node, 'column', None)
+            "start_line": start_line,
+            "end_line": end_line,
+            "column": column
         }
 
     def _get_node_calls(self, node: ASTNode) -> List[Dict[str, Any]]:
         """Get function calls made by a node using AST traversal."""
         calls = []
-        
+
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return calls
-            
+
         # Track found calls to avoid duplicates
         found_calls = set()
-        
+
         def traverse_node(ts_node):
             """Recursively traverse tree-sitter nodes to find function calls."""
             if not ts_node:
                 return
-                
+
             node_type = ts_node.type
-            
+
             # Identify function call patterns
             if node_type == "call_expression":
                 call_info = self._analyze_call_expression(ts_node)
@@ -1838,8 +2005,8 @@ class SolidityQueryEngineV2:
                     if call_key not in found_calls:
                         calls.append(call_info)
                         found_calls.add(call_key)
-                        
-            elif node_type in ["member_access", "member_expression"]:
+
+            elif node_type in ["member_access", "member_expression", "member_access_expression"]:
                 # Check if this member access is part of a low-level call
                 member_call = self._analyze_member_call(ts_node)
                 if member_call:
@@ -1847,20 +2014,161 @@ class SolidityQueryEngineV2:
                     if call_key not in found_calls:
                         calls.append(member_call)
                         found_calls.add(call_key)
-            
+
             # Recursively traverse children
             for child in ts_node.children:
                 traverse_node(child)
-        
+
         traverse_node(node.raw_node)
         return calls
-    
+
+    def _get_node_statements(self, node: ASTNode) -> List[Dict[str, Any]]:
+        """Get statements from a node using AST traversal."""
+        statements = []
+
+        if not hasattr(node, 'raw_node') or not node.raw_node:
+            return statements
+
+        # Track found statements to avoid duplicates
+        found_statements = set()
+
+        def traverse_node(ts_node):
+            """Recursively traverse tree-sitter nodes to find statements."""
+            if not ts_node:
+                return
+
+            node_type = ts_node.type
+
+            # Identify statement patterns
+            if node_type in [
+                "expression_statement", "return_statement", "if_statement",
+                "for_statement", "while_statement", "emit_statement",
+                "assembly_statement", "variable_declaration_statement"
+            ]:
+                stmt_info = self._analyze_statement(ts_node, node)
+                if stmt_info:
+                    stmt_key = f"{stmt_info['type']}_{stmt_info['position']}"
+                    if stmt_key not in found_statements:
+                        statements.append(stmt_info)
+                        found_statements.add(stmt_key)
+
+            # Continue traversing child nodes
+            for child in ts_node.children:
+                traverse_node(child)
+
+        traverse_node(node.raw_node)
+        return statements
+
+    def _analyze_statement(self, ts_node, parent_node: ASTNode) -> Optional[Dict[str, Any]]:
+        """Analyze a statement node to extract statement information."""
+        try:
+            # Get position in source code
+            start_byte = ts_node.start_byte
+            end_byte = ts_node.end_byte
+            start_point = ts_node.start_point
+
+            # Get source text
+            source_text = ""
+            if hasattr(self, 'source_manager') and self.source_manager:
+                source_text = ts_node.text.decode('utf-8') if ts_node.text else ""
+
+            stmt_info = {
+                "type": ts_node.type,
+                "source_location": {
+                    "start_byte": start_byte,
+                    "end_byte": end_byte,
+                    "line": start_point[0] + 1,
+                    "column": start_point[1]
+                },
+                "position": f"{start_point[0]}:{start_point[1]}",
+                "source_text": source_text[:100] + "..." if len(source_text) > 100 else source_text,
+                "parent_contract": getattr(parent_node, 'parent_contract', None),
+                "parent_function": getattr(parent_node, 'name', None)
+            }
+
+            return stmt_info
+
+        except Exception:
+            return None
+
+    def _get_node_expressions(self, node: ASTNode) -> List[Dict[str, Any]]:
+        """Get expressions from a node using AST traversal."""
+        expressions = []
+
+        if not hasattr(node, 'raw_node') or not node.raw_node:
+            return expressions
+
+        # Track found expressions to avoid duplicates
+        found_expressions = set()
+
+
+        self._traverse_node_for_expressions(node.raw_node, expressions, found_expressions, node)
+        return expressions
+
+    def _traverse_node_for_expressions(self, ts_node, expressions: List[Dict[str, Any]],
+                                     found_expressions: set, parent_node: ASTNode):
+        """Recursively traverse tree-sitter nodes to find expressions."""
+        if not ts_node:
+            return
+
+        node_type = ts_node.type
+
+        # Identify expression patterns
+        if node_type in [
+            "binary_expression", "unary_expression", "assignment_expression",
+            "call_expression", "member_expression", "identifier",
+            "literal", "array_expression", "conditional_expression",
+            "update_expression", "postfix_expression", "parenthesized_expression"
+        ]:
+            expr_info = self._analyze_expression(ts_node, parent_node)
+            if expr_info:
+                expr_key = f"{expr_info['type']}_{expr_info['position']}"
+                if expr_key not in found_expressions:
+                    expressions.append(expr_info)
+                    found_expressions.add(expr_key)
+
+        # Continue traversing child nodes
+        for child in ts_node.children:
+            self._traverse_node_for_expressions(child, expressions, found_expressions, parent_node)
+
+    def _analyze_expression(self, ts_node, parent_node: ASTNode) -> Optional[Dict[str, Any]]:
+        """Analyze an expression node to extract expression information."""
+        try:
+            # Get position in source code
+            start_byte = ts_node.start_byte
+            end_byte = ts_node.end_byte
+            start_point = ts_node.start_point
+
+            # Get source text
+            source_text = ""
+            if hasattr(self, 'source_manager') and self.source_manager:
+                source_text = ts_node.text.decode('utf-8') if ts_node.text else ""
+
+            expr_info = {
+                "type": ts_node.type,
+                "source_location": {
+                    "start_byte": start_byte,
+                    "end_byte": end_byte,
+                    "line": start_point[0] + 1,
+                    "column": start_point[1]
+                },
+                "position": f"{start_point[0]}:{start_point[1]}",
+                "source_text": source_text[:50] + "..." if len(source_text) > 50 else source_text,
+                "parent_contract": getattr(parent_node, 'parent_contract', None),
+                "parent_function": getattr(parent_node, 'name', None)
+            }
+
+            return expr_info
+
+        except Exception:
+            return None
+
     def _analyze_call_expression(self, ts_node) -> Optional[Dict[str, Any]]:
         """Analyze a call_expression node to extract call information."""
         try:
             # Find the function being called
             function_node = None
-            
+
             # First check direct children for identifier/member_access/member_expression
             for child in ts_node.children:
                 if child.type in ["identifier", "member_access", "member_expression"]:
@@ -1874,40 +2182,40 @@ class SolidityQueryEngineV2:
                             break
                     if function_node:
                         break
-                    
+
             if not function_node:
                 return None
-                
+
             call_name = function_node.text.decode('utf-8') if function_node.text else None
             if not call_name:
                 return None
-                
+
             # Determine call type based on the function name/structure
             call_type = self._classify_call_type(call_name, function_node)
-            
+
             return {
                 'name': call_name,
                 'type': call_type,
                 'position': function_node.start_byte,
                 'arguments_count': self._count_call_arguments(ts_node)
             }
-            
+
         except Exception as e:
             self.logger.warning(f"Failed to analyze function call: {str(e)}")
             return None
-    
+
     def _analyze_member_call(self, ts_node) -> Optional[Dict[str, Any]]:
         """Analyze member access that might be a low-level call."""
         try:
             member_text = ts_node.text.decode('utf-8') if ts_node.text else None
             if not member_text:
                 return None
-                
+
             # Check for low-level call patterns
             low_level_calls = {
                 'call', 'delegatecall', 'staticcall', 'send', 'transfer'
             }
-            
+
             # Extract the method name from member access
             parts = member_text.split('.')
             if len(parts) >= 2:
@@ -1919,13 +2227,13 @@ class SolidityQueryEngineV2:
                         'position': ts_node.start_byte,
                         'call_method': method_name
                     }
-                    
+
         except Exception as e:
             self.logger.debug(f"Failed to analyze member call: {str(e)}")
             pass
-            
+
         return None
-    
+
     def _classify_call_type(self, call_name: str, _function_node) -> str:
         """Classify the type of function call."""
         # Built-in functions
@@ -1933,15 +2241,15 @@ class SolidityQueryEngineV2:
             'require', 'assert', 'revert', 'keccak256', 'sha256', 'ripemd160',
             'ecrecover', 'addmod', 'mulmod', 'selfdestruct'
         }
-        
+
         if call_name in builtin_functions:
             return 'builtin'
-            
+
         # Member access calls (contract.method or address.method)
         if '.' in call_name:
             parts = call_name.split('.')
             method = parts[-1]
-            
+
             # True low-level calls on addresses
             if method in {'call', 'delegatecall', 'staticcall', 'send'}:
                 return 'low_level'
@@ -1949,14 +2257,14 @@ class SolidityQueryEngineV2:
                 # All other member access calls are considered external
                 # This includes transfer(), approve(), balanceOf(), etc.
                 return 'external'
-        
+
         # Library calls (if the function name suggests it)
         if any(lib in call_name.lower() for lib in ['safemath', 'strings', 'address']):
             return 'library'
-            
+
         # Default to internal for simple identifiers
         return 'internal'
-    
+
     def _count_call_arguments(self, call_node) -> int:
         """Count the number of arguments in a function call."""
         try:
@@ -1994,33 +2302,33 @@ class SolidityQueryEngineV2:
     def _get_node_variables(self, node: ASTNode) -> List[Dict[str, Any]]:
         """Get variables accessed by a node using AST traversal."""
         variables = []
-        
+
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return variables
-            
+
         # Track found variables to avoid duplicates
         found_vars = set()
-        
+
         def traverse_node(ts_node, parent_context=None):
             """Recursively traverse tree-sitter nodes to find variable access."""
             if not ts_node:
                 return
-                
+
             node_type = ts_node.type
-            
+
             # Skip certain contexts where identifiers are not variables
             skip_contexts = {
                 'function_definition', 'constructor_definition', 'modifier_definition',
                 'function_call', 'modifier_invocation', 'parameter_list', 'type_name',
                 'function_type', 'event_definition', 'struct_definition', 'enum_definition'
             }
-            
+
             if parent_context in skip_contexts:
                 # Still traverse children but don't capture variables in these contexts
                 for child in ts_node.children:
                     traverse_node(child, node_type)
                 return
-            
+
             # Handle member access first (e.g., msg.sender, block.timestamp)
             if node_type in ["member_access", "member_expression"]:
                 member_info = self._analyze_member_access(ts_node)
@@ -2029,15 +2337,15 @@ class SolidityQueryEngineV2:
                     found_vars.add(member_info['name'])
                 # Don't traverse children of member_access to avoid processing individual parts
                 return
-                    
-            # Handle array/mapping access like balances[user] 
+
+            # Handle array/mapping access like balances[user]
             elif node_type == "index_access":
                 index_info = self._analyze_index_access(ts_node, parent_context)
                 if index_info and index_info['name'] not in found_vars:
                     variables.append(index_info)
                     found_vars.add(index_info['name'])
                 # Still traverse children to find variables in the index expression
-                    
+
             # Handle standalone identifiers (but only in appropriate contexts)
             elif node_type == "identifier":
                 # Skip if this identifier is part of a member access expression
@@ -2050,14 +2358,14 @@ class SolidityQueryEngineV2:
                         if var_info:
                             variables.append(var_info)
                             found_vars.add(var_name)
-            
+
             # Recursively traverse children
             for child in ts_node.children:
                 traverse_node(child, node_type)
-        
+
         traverse_node(node.raw_node)
         return variables
-    
+
     def _analyze_identifier_context(self, ts_node, var_name: str, parent_context: Optional[str]) -> Optional[Dict[str, Any]]:
         """Analyze an identifier node to determine if it's a relevant variable."""
         # Skip common keywords, types, and built-in globals
@@ -2066,59 +2374,59 @@ class SolidityQueryEngineV2:
             'require', 'revert', 'assert', 'return', 'if', 'for', 'while', 'do',
             'function', 'modifier', 'emit', 'event', 'struct', 'enum', 'new', 'delete',
             'contract', 'interface', 'library', 'using', 'pragma', 'import', 'is', 'override',
-            
+
             # Types
             'uint256', 'uint128', 'uint64', 'uint32', 'uint16', 'uint8', 'uint',
             'int256', 'int128', 'int64', 'int32', 'int16', 'int8', 'int',
             'address', 'bool', 'string', 'bytes', 'bytes32', 'bytes4',
             'mapping', 'array',
-            
+
             # Storage/memory modifiers
-            'memory', 'storage', 'calldata', 
-            
+            'memory', 'storage', 'calldata',
+
             # Function modifiers
             'view', 'pure', 'payable', 'constant', 'immutable',
             'public', 'private', 'internal', 'external',
-            
+
             # Literals and built-ins
             'true', 'false', 'null', 'this', 'super',
-            
+
             # Built-in globals (individual parts)
             'msg', 'block', 'tx', 'gasleft', 'now',
-            
+
             # Common identifiers that aren't variables
             'sender', 'value', 'data', 'sig', 'timestamp', 'number', 'coinbase', 'difficulty',
             'origin', 'gasprice',
-            
+
             # Common function names that get misidentified
             'transfer', 'approve', 'mint', 'burn', 'add', 'sub', 'mul', 'div',
             'safeTransfer', 'safeTransferFrom', '_mint', '_burn', '_transfer', '_approve',
             '_safeMint', '_safeBurn', 'transferFrom', 'increaseAllowance', 'decreaseAllowance',
-            
+
             # Common modifier names
             'onlyOwner', 'nonReentrant', 'whenNotPaused', 'validAddress',
-            
+
             # Event names that might be captured
             'Transfer', 'Approval', 'Mint', 'Burn', 'TokenMinted', 'OwnershipTransferred'
         }
-        
+
         if var_name.lower() in excluded_names:
             return None
-            
+
         # Determine variable type and access pattern
         var_type = self._classify_variable_type(var_name, parent_context)
         if not var_type:
             return None
-            
+
         access_type = self._determine_access_type(ts_node)
-        
+
         return {
             'name': var_name,
             'access_type': access_type,
             'position': ts_node.start_byte,
             'variable_type': var_type
         }
-    
+
     def _analyze_member_access(self, ts_node) -> Optional[Dict[str, Any]]:
         """Analyze member access expressions like contract.method or object.property."""
         try:
@@ -2126,28 +2434,28 @@ class SolidityQueryEngineV2:
             member_text = ts_node.text.decode('utf-8') if ts_node.text else None
             if not member_text:
                 return None
-                
+
             # Skip built-in globals - these are NOT variables we want to track
             builtin_globals = {
-                'msg.sender', 'msg.value', 'msg.data', 'msg.sig', 
+                'msg.sender', 'msg.value', 'msg.data', 'msg.sig',
                 'block.timestamp', 'block.number', 'block.coinbase', 'block.difficulty',
                 'tx.origin', 'tx.gasprice', 'gasleft()', 'this.balance'
             }
-            
+
             if member_text in builtin_globals:
                 # These are built-in globals, not variables we want to track
                 return None
-                
-            # For other member access (like state.property or contract.method), 
+
+            # For other member access (like state.property or contract.method),
             # we want to extract the base object as a variable
             parts = member_text.split('.', 1)
             if len(parts) >= 2:
                 base_name = parts[0]
-                
+
                 # Skip common patterns that aren't variables
                 if base_name in {'msg', 'block', 'tx', 'this', 'super'}:
                     return None
-                    
+
                 # This could be a state variable or contract reference
                 var_type = self._classify_variable_type(base_name, 'member_access')
                 if var_type:
@@ -2157,13 +2465,13 @@ class SolidityQueryEngineV2:
                         'position': ts_node.start_byte,
                         'variable_type': var_type
                     }
-                
+
         except Exception as e:
             self.logger.debug(f"Failed to analyze index access: {str(e)}")
             pass
-            
+
         return None
-    
+
     def _analyze_index_access(self, ts_node, _parent_context: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Analyze index access expressions like balances[user]."""
         try:
@@ -2173,49 +2481,49 @@ class SolidityQueryEngineV2:
                 if child.type == "identifier":
                     base_node = child
                     break
-                    
+
             if not base_node:
                 return None
-                
+
             var_name = base_node.text.decode('utf-8') if base_node.text else None
             if not var_name:
                 return None
-                
+
             # Classify the variable type
             var_type = self._classify_variable_type(var_name, 'index_access')
             if not var_type:
                 return None
-                
+
             access_type = self._determine_access_type(ts_node)
-            
+
             return {
                 'name': var_name,
                 'access_type': access_type,
                 'position': base_node.start_byte,
                 'variable_type': var_type
             }
-            
+
         except Exception as e:
             self.logger.debug(f"Failed to classify variable type: {str(e)}")
             pass
-            
+
         return None
-    
+
     def _classify_variable_type(self, _var_name: str, context: Optional[str]) -> Optional[str]:
         """Classify variable type based on context only, no patterns."""
-        
+
         # Context-based classification only
         if context == 'index_access':
             return 'array_access'
         elif context == 'member_access':
             return 'member_reference'
-            
+
         # Return generic type for all other variables
         return 'variable'
-    
+
     def _find_variable_declaration(self, var_name: str) -> Optional[Dict[str, str]]:
         """Find variable declaration using AST traversal."""
-        
+
         # Search through all loaded AST nodes for variable declarations
         for contract in self.parser.parsed_contracts:
             for node in contract.all_nodes:
@@ -2231,41 +2539,41 @@ class SolidityQueryEngineV2:
                                 return {'type': 'state_variable'}
                         else:
                             return {'type': 'local_variable'}
-                
+
                 # Check function parameters
                 elif hasattr(node, 'node_type') and 'FunctionDeclaration' in str(node.node_type):
                     if hasattr(node, 'parameters'):
                         for param in node.parameters:
                             if hasattr(param, 'name') and param.name == var_name:
                                 return {'type': 'parameter'}
-                
+
                 # Check struct members, enum values, etc.
                 elif hasattr(node, 'node_type') and 'StructDeclaration' in str(node.node_type):
                     if hasattr(node, 'members'):
                         for member in node.members:
                             if hasattr(member, 'name') and member.name == var_name:
                                 return {'type': 'struct_member'}
-        
+
         return None
-    
+
     def _is_builtin_global_access(self, ts_node) -> bool:
         """Check if this is a built-in global access using AST structure."""
         if not ts_node or not ts_node.children:
             return False
-            
+
         # Check if this is msg.*, block.*, tx.* access
         children = [child for child in ts_node.children if child.type == 'identifier']
         if len(children) >= 1:
             base_name = children[0].text.decode('utf-8') if children[0].text else ''
             return base_name in ['msg', 'block', 'tx', 'abi', 'address']
         return False
-    
+
     def _is_low_level_call(self, ts_node) -> bool:
         """Check if this is a low-level call using AST structure."""
         member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
         if not member_text or '.' not in member_text:
             return False
-            
+
         # Extract method name from AST structure
         for child in ts_node.children:
             if child.type == 'identifier':
@@ -2274,12 +2582,12 @@ class SolidityQueryEngineV2:
                 if method_name in ['call', 'delegatecall', 'staticcall', 'send']:
                     return True
         return False
-    
+
     def _is_external_contract_call(self, ts_node) -> bool:
         """Check if this is an external contract call using AST structure."""
         # If it's not a built-in global and has a dot, likely external
         return not self._is_builtin_global_access(ts_node)
-    
+
     def _is_update_expression(self, ts_node) -> bool:
         """Check if this is an update expression (++/--) using AST structure."""
         # Look for increment/decrement operators in the node's children
@@ -2287,20 +2595,24 @@ class SolidityQueryEngineV2:
             if child.type in ["++", "--", "increment_expression", "decrement_expression"]:
                 return True
         return False
-    
+
     def _node_uses_operators(self, node: ASTNode, operators: List[str]) -> bool:
         """Check if node uses specific operators using AST analysis."""
+        # Fallback to source code analysis if no raw_node available (for ExtractedExpression/ExtractedStatement)
         if not hasattr(node, 'raw_node') or not node.raw_node:
+            source_code = node.get_source_code() if hasattr(node, 'get_source_code') else ''
+            if source_code:
+                return any(op in source_code for op in operators)
             return False
-        
+
         def check_operators(ts_node) -> bool:
             if not ts_node:
                 return False
-                
+
             # Map operator strings to AST node types
             operator_node_types = {
                 '+': ['binary_expression'],
-                '-': ['binary_expression'],  
+                '-': ['binary_expression'],
                 '*': ['binary_expression'],
                 '/': ['binary_expression'],
                 '%': ['binary_expression'],
@@ -2320,22 +2632,22 @@ class SolidityQueryEngineV2:
                 '||': ['binary_expression'],
                 '!': ['unary_expression']
             }
-            
+
             # Check if this node type matches any requested operators
             for op in operators:
                 if op in operator_node_types:
                     if ts_node.type in operator_node_types[op]:
                         return True
-            
+
             # Recursively check children
             for child in ts_node.children:
                 if check_operators(child):
                     return True
-                    
+
             return False
-        
+
         return check_operators(node.raw_node)
-    
+
     def _determine_access_type(self, ts_node) -> str:
         """Determine if this is a read or write access."""
         # Walk up the parent chain to see if this is part of an assignment
@@ -2349,18 +2661,18 @@ class SolidityQueryEngineV2:
             elif parent.type in ["variable_declaration", "state_variable_declaration"]:
                 return 'write'
             parent = parent.parent
-            
+
         return 'read'
-    
+
     def _node_contains(self, ancestor, descendant) -> bool:
         """Check if ancestor node contains descendant node."""
-        return (ancestor.start_byte <= descendant.start_byte and 
+        return (ancestor.start_byte <= descendant.start_byte and
                 ancestor.end_byte >= descendant.end_byte)
 
     def _get_node_events(self, node: ASTNode) -> List[Dict[str, Any]]:
         """Get events emitted by a node using AST analysis."""
         events = []
-        
+
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return events
 
@@ -2368,26 +2680,26 @@ class SolidityQueryEngineV2:
             """Recursively find emit statements in the AST."""
             if not ts_node:
                 return
-                
+
             node_type = ts_node.type
-            
+
             # Look for emit statements
             if node_type == "emit_statement":
                 # Find the event name being emitted
                 for child in ts_node.children:
-                    if child.type == "call_expression":
-                        # Find the event identifier
-                        for call_child in child.children:
-                            if call_child.type == "identifier":
-                                event_name = call_child.text.decode('utf-8') if call_child.text else None
+                    if child.type == "expression":
+                        # Find the event identifier within the expression
+                        for expr_child in child.children:
+                            if expr_child.type == "identifier":
+                                event_name = expr_child.text.decode('utf-8') if expr_child.text else None
                                 if event_name:
                                     events.append({
                                         'name': event_name,
-                                        'position': call_child.start_byte
+                                        'position': expr_child.start_byte
                                     })
                                 break
                         break
-                        
+
             # Also look for emit keyword followed by call expressions
             elif node_type == "identifier" and ts_node.text and ts_node.text.decode('utf-8') == "emit":
                 # Check if the next sibling is a call expression
@@ -2409,7 +2721,7 @@ class SolidityQueryEngineV2:
                                         })
                                     break
                             break
-            
+
             # Recursively check children
             for child in ts_node.children:
                 find_emit_statements(child)
@@ -2430,7 +2742,7 @@ class SolidityQueryEngineV2:
     def _get_node_dependencies(self, node: ASTNode) -> List[str]:
         """Get dependencies of a node using AST analysis."""
         dependencies = []
-        
+
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return dependencies
 
@@ -2438,9 +2750,9 @@ class SolidityQueryEngineV2:
             """Recursively find dependencies in the AST."""
             if not ts_node:
                 return
-                
+
             node_type = ts_node.type
-            
+
             # Look for import statements
             if node_type == "import_directive":
                 for child in ts_node.children:
@@ -2448,7 +2760,7 @@ class SolidityQueryEngineV2:
                         import_path = child.text.decode('utf-8').strip('"\'') if child.text else None
                         if import_path:
                             dependencies.append(import_path)
-                            
+
             # Look for using directives
             elif node_type == "using_for_directive":
                 for child in ts_node.children:
@@ -2457,7 +2769,7 @@ class SolidityQueryEngineV2:
                         if library_name:
                             dependencies.append(library_name)
                             break
-                            
+
             # Look for inheritance
             elif node_type == "inheritance_specifier":
                 for child in ts_node.children:
@@ -2469,12 +2781,24 @@ class SolidityQueryEngineV2:
                                 if base_contract:
                                     dependencies.append(base_contract)
                                     break
-            
+
             # Recursively check children
             for child in ts_node.children:
                 find_dependencies(child)
 
+        # For contracts, we need to look at the source unit (file level) to find imports
+        source_node = node.raw_node
+
+        # Navigate to the source unit (root of the file) to find imports
+        while source_node.parent:
+            source_node = source_node.parent
+
+        # First, find imports at source level
+        find_dependencies(source_node)
+
+        # Then, find contract-specific dependencies (inheritance, using directives)
         find_dependencies(node.raw_node)
+
         return list(set(dependencies))  # Remove duplicates
 
     def _get_inheritance_details(self, node: ContractDeclaration) -> Dict[str, Any]:

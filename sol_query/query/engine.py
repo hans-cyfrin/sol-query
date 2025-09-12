@@ -1019,7 +1019,7 @@ class SolidityQueryEngine:
         return chains
 
     def find_by_pattern(self, pattern: Union[str, Pattern], **filters: Any) -> List[ASTNode]:
-        """
+        r"""
         Find nodes matching a regex pattern in their source code.
         
         This is a powerful method for finding code patterns that don't fit
@@ -1767,7 +1767,7 @@ class SolidityQueryEngine:
         return result
 
     def union(self, *element_sets) -> List[ASTNode]:
-        """
+        r"""
         Find union of multiple element sets.
         
         This utility method combines multiple query results to find elements

@@ -11,7 +11,7 @@ from sol_query.core.ast_nodes import (
     EnumDeclaration, Parameter, Block, Statement, Expression, Identifier,
     Literal, CallExpression, BinaryExpression, ArrayAccess, SliceAccess,
     ParenthesizedExpression, InlineArrayExpression, NewExpression, StructExpression,
-    ReturnStatement, ExpressionStatement, GenericStatement, ImportStatement,
+    ReturnStatement, ExpressionStatement, ImportStatement,
     Visibility, StateMutability, NodeType
 )
 from sol_query.core.parser import SolidityParser
@@ -806,7 +806,7 @@ class ASTBuilder:
         expressions = self._extract_all_expressions_recursively(node)
 
         # Create a generic statement with nested expressions
-        stmt = GenericStatement(
+        stmt = ExpressionStatement(
             source_location=self._get_source_location(node),
             raw_node=node
         )
@@ -856,7 +856,7 @@ class ASTBuilder:
         expressions = self._extract_all_expressions_recursively(node)
 
         # Create a generic statement with nested expressions
-        stmt = GenericStatement(
+        stmt = ExpressionStatement(
             source_location=self._get_source_location(node),
             raw_node=node
         )
@@ -871,7 +871,7 @@ class ASTBuilder:
         expressions = self._extract_all_expressions_recursively(node)
 
         # Create a generic statement but store expressions for traversal
-        stmt = GenericStatement(
+        stmt = ExpressionStatement(
             node_type=NodeType.IF_STATEMENT,
             source_location=self._get_source_location(node),
             raw_node=node
@@ -887,7 +887,7 @@ class ASTBuilder:
         expressions = self._extract_all_expressions_recursively(node)
 
         # Create a generic statement but store expressions for traversal
-        stmt = GenericStatement(
+        stmt = ExpressionStatement(
             node_type=NodeType.FOR_STATEMENT,
             source_location=self._get_source_location(node),
             raw_node=node
@@ -899,7 +899,7 @@ class ASTBuilder:
 
     def _build_while_statement(self, node: tree_sitter.Node) -> Statement:
         """Build a while statement."""
-        return GenericStatement(
+        return ExpressionStatement(
             node_type=NodeType.WHILE_STATEMENT,
             source_location=self._get_source_location(node),
             raw_node=node

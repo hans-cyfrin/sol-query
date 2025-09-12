@@ -27,11 +27,11 @@ engine.load_sources([
 ```
 
 ### Conventions for This Plan
-- Patterns use simple wildcards only (e.g., "*Token*", "transfer*"). Regex is not assumed.
-- Case sensitivity follows implementation defaults; tests must not depend on toggling case sensitivity.
+- Patterns are regex evaluated via Python re.search (e.g., ".*Token.*", "transfer.*", "composition_and_imports/.*").
+- Case sensitivity follows implementation defaults (case-sensitive). Do not rely on disabling case sensitivity.
 - Expected outputs focus on structure, presence of keys, non-emptiness where appropriate, and element types; avoid hardcoded counts.
 - When a directory or file pattern is referenced, assume it exists in the listed fixtures. If not, adapt the pattern to a nearby equivalent.
-- For identifier-based tests, use names that commonly exist in provided fixtures (e.g., typical token/NFT patterns, modifiers, variables). Adapt as needed to actual files if names differ.
+- For identifier-based tests, use names that commonly exist in provided fixtures. Adapt as needed to actual files if names differ.
 
 ---
 
@@ -99,13 +99,13 @@ engine.load_sources([
 
 13) Functions by name pattern (single)
 - Method: query_code
-- Params: { query_type: "functions", filters: { names: "transfer*" } }
-- Expected: results where name matches the wildcard; zero or more matches.
+- Params: { query_type: "functions", filters: { names: "transfer.*" } }
+- Expected: results where name matches the regex; zero or more matches.
 
 14) Functions by name patterns (multiple)
 - Method: query_code
-- Params: { query_type: "functions", filters: { names: ["approve", "*mint*"] } }
-- Expected: names in set; verify matching on both exact and wildcard.
+- Params: { query_type: "functions", filters: { names: ["approve", ".*mint.*"] } }
+- Expected: names in set; verify matching on both exact and regex.
 
 15) Functions by visibility (public/external)
 - Method: query_code
@@ -124,17 +124,17 @@ engine.load_sources([
 
 18) Functions with specific modifiers
 - Method: query_code
-- Params: { query_type: "functions", filters: { modifiers: ["only*"] } }
-- Expected: functions that include any modifier matching the pattern.
+- Params: { query_type: "functions", filters: { modifiers: ["only.*"] } }
+- Expected: functions that include any modifier matching the regex.
 
 19) Functions filtered by contract names (filters)
 - Method: query_code
-- Params: { query_type: "functions", filters: { contracts: ["*Token*", "*NFT*"] } }
-- Expected: results belong to contracts matching those patterns.
+- Params: { query_type: "functions", filters: { contracts: [".*Token.*", ".*NFT.*"] } }
+- Expected: results belong to contracts whose names match these regexes.
 
 20) Variables by type (uint patterns)
 - Method: query_code
-- Params: { query_type: "variables", filters: { types: ["uint*", "mapping*"] } }
+- Params: { query_type: "variables", filters: { types: ["uint.*", "mapping.*"] } }
 - Expected: variables whose type_name/var_type matches patterns.
 
 21) State variables only
@@ -172,10 +172,10 @@ engine.load_sources([
 - Params: { query_type: "functions", filters: { is_payable: True } }
 - Expected: functions whose state_mutability is payable.
 
-28) Calls filtered by call_types (external)
+28) Calls filtered by call_types (name substrings)
 - Method: query_code
-- Params: { query_type: "functions", filters: { call_types: ["external"] } }
-- Expected: functions that make at least one call classified as external.
+- Params: { query_type: "functions", filters: { call_types: ["transfer", "balanceOf"] } }
+- Expected: functions that make at least one call whose name contains any provided substring.
 
 29) Calls filtered by low_level=True
 - Method: query_code
@@ -184,22 +184,22 @@ engine.load_sources([
 
 30) Access patterns in source (pattern search)
 - Method: query_code
-- Params: { query_type: "functions", filters: { access_patterns: ["msg.sender", "balanceOf("] } }
+- Params: { query_type: "functions", filters: { access_patterns: ["msg.sender", "balanceOf(\"] } }
 - Expected: functions whose source contains any of the patterns.
 
 31) Scope: restrict to specific contracts
 - Method: query_code
-- Params: { query_type: "functions", scope: { contracts: ["*Token*"] } }
+- Params: { query_type: "functions", scope: { contracts: [".*Token.*"] } }
 - Expected: results only from matching contracts.
 
 32) Scope: restrict to specific functions
 - Method: query_code
-- Params: { query_type: "variables", scope: { functions: ["*mint*", "*burn*"] } }
+- Params: { query_type: "variables", scope: { functions: [".*mint.*", ".*burn.*"] } }
 - Expected: variables appearing in the named function contexts.
 
 33) Scope: restrict by file patterns
 - Method: query_code
-- Params: { query_type: "contracts", scope: { files: ["*/composition_and_imports/*"] } }
+- Params: { query_type: "contracts", scope: { files: ["composition_and_imports/.*"] } }
 - Expected: contracts defined in files matching pattern.
 
 34) Scope: restrict by directory patterns
@@ -209,8 +209,8 @@ engine.load_sources([
 
 35) Scope: inheritance tree filter
 - Method: query_code
-- Params: { query_type: "functions", scope: { inheritance_tree: "ERC*" } }
-- Expected: functions whose contract inherits from a base matching the pattern (if present).
+- Params: { query_type: "functions", scope: { inheritance_tree: "ERC721" } }
+- Expected: functions whose contract inherits from the base named "ERC721" (if present).
 
 36) Include: source code
 - Method: query_code
@@ -265,16 +265,16 @@ engine.load_sources([
 46) Options: max_results
 - Method: query_code
 - Params: { query_type: "functions", options: { max_results: 5 } }
-- Expected: at most 5 results; metadata.query_info.result_count reflects truncated length.
+- Expected: at most 5 results; query_info.result_count reflects truncated length.
 
 47) Combined filters: names + visibility + state mutability
 - Method: query_code
-- Params: { query_type: "functions", filters: { names: "*balance*", visibility: ["public", "external"], state_mutability: ["view", "pure"] } }
+- Params: { query_type: "functions", filters: { names: ".*balance.*", visibility: ["public", "external"], state_mutability: ["view", "pure"] } }
 - Expected: all returned functions satisfy all requested filter constraints.
 
 48) Combined filters: modifiers + changes_state
 - Method: query_code
-- Params: { query_type: "functions", filters: { modifiers: ["*Owner*", "*Admin*"], changes_state: True } }
+- Params: { query_type: "functions", filters: { modifiers: [".*Owner.*", ".*Admin.*"], changes_state: True } }
 - Expected: only functions with matching modifiers and detected state changes.
 
 49) Combined filters: has_external_calls + call_types
@@ -289,7 +289,7 @@ engine.load_sources([
 
 51) Variables by types and scope (contract patterns)
 - Method: query_code
-- Params: { query_type: "variables", filters: { types: ["mapping*", "address"] }, scope: { contracts: ["*Pool*", "*Token*"] } }
+- Params: { query_type: "variables", filters: { types: ["mapping*", "address"] }, scope: { contracts: [".*Pool.*", ".*Token.*"] } }
 - Expected: variable declarations that match type patterns within selected contracts.
 
 52) Events with include source and ast
@@ -299,7 +299,7 @@ engine.load_sources([
 
 53) Modifiers in specific files
 - Method: query_code
-- Params: { query_type: "modifiers", scope: { files: ["*/composition_and_imports/*"] } }
+- Params: { query_type: "modifiers", scope: { files: ["composition_and_imports/.*"] } }
 - Expected: modifier declarations from matching files.
 
 54) Errors in a directory
@@ -319,13 +319,13 @@ engine.load_sources([
 
 57) Access patterns in variables (source scan)
 - Method: query_code
-- Params: { query_type: "variables", filters: { names: ["*supply*", "*owner*"] } }
+- Params: { query_type: "variables", filters: { names: [".*supply.*", ".*owner.*"] } }
 - Expected: variables whose names match patterns.
 
-58) Calls query with scope by functions
+58) Calls query filtered by names
 - Method: query_code
-- Params: { query_type: "calls", scope: { functions: ["*transfer*", "*withdraw*"] } }
-- Expected: call nodes originating from the named functions.
+- Params: { query_type: "calls", filters: { names: ["transfer", "withdraw"] } }
+- Expected: call nodes whose names match any of the provided regexes.
 
 59) Contracts include dependencies and inheritance
 - Method: query_code
@@ -354,7 +354,7 @@ engine.load_sources([
 63) Comprehensive function details by name
 - Method: get_details
 - Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "comprehensive" }
-- Expected: comprehensive_info includes dependencies/call_graph/data_flow/security_analysis keys (populated per implementation logic).
+- Expected: comprehensive_info includes dependencies, call_graph, and data_flow keys (populated per implementation logic).
 
 64) Basic contract details by name
 - Method: get_details
@@ -439,7 +439,7 @@ engine.load_sources([
 80) Options: show_call_chains
 - Method: get_details
 - Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "comprehensive", options: { show_call_chains: True } }
-- Expected: comprehensive_info.call_graph present; call_chains may be available depending on implementation.
+- Expected: comprehensive_info.call_graph present. (Options flag accepted; output structure is unchanged.)
 
 81) Mixed element types batch (contracts and variables)
 - Method: get_details
@@ -473,7 +473,7 @@ engine.load_sources([
 86) References for a function (all)
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", reference_type: "all" }
-- Expected: data.references.usages[], definitions[], and summary/metadata present; success=True.
+- Expected: data.references.usages[], definitions[] present; metadata.performance available; success=True.
 
 87) Function usages only
 - Method: find_references
@@ -527,18 +527,18 @@ engine.load_sources([
 
 97) References filtered by contracts
 - Method: find_references
-- Params: { target: "transfer", target_type: "function", filters: { contracts: ["*Token*"] } }
+- Params: { target: "transfer", target_type: "function", filters: { contracts: [".*Token.*"] } }
 - Expected: only usages/definitions whose location.contract matches patterns.
 
 98) References filtered by files
 - Method: find_references
-- Params: { target: "transfer", target_type: "function", filters: { files: ["*/detailed_scenarios/*"] } }
+- Params: { target: "transfer", target_type: "function", filters: { files: ["detailed_scenarios/.*"] } }
 - Expected: only locations from matching files.
 
 99) Non-existent target element
 - Method: find_references
 - Params: { target: "doesNotExist", target_type: "function" }
-- Expected: success=False error response with query_info.validation_errors or errors[] message indicating not found.
+- Expected: success=False error response with errors[] indicating not found.
 
 100) Target types coverage (modifier/event/struct/enum)
 - Method: find_references

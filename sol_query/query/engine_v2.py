@@ -757,7 +757,7 @@ class SolidityQueryEngineV2:
             elif node_type == "member_access":
                 member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
                 if member_text:
-                    # Check for low-level calls
+                    # Check for low-level calls first
                     if any(method in member_text for method in ['call', 'delegatecall', 'staticcall', 'send', 'transfer']):
                         return True
                     # Check for external contract calls (exclude builtins)
@@ -812,9 +812,7 @@ class SolidityQueryEngineV2:
                 
             # Check for update expressions (++, --)
             elif node_type in ["update_expression", "unary_expression"]:
-                operator_text = ts_node.text.decode('utf-8') if ts_node.text else ''
-                if any(op in operator_text for op in ['++', '--']):
-                    return True
+                return self._is_update_expression(ts_node)
                     
             # Check for function calls that modify state
             elif node_type == "call_expression":
@@ -1072,6 +1070,8 @@ class SolidityQueryEngineV2:
             info["visibility"] = str(element.visibility) if hasattr(element, 'visibility') else None
             info["state_mutability"] = str(element.state_mutability) if hasattr(element, 'state_mutability') else None
             info["modifiers"] = element.modifiers if hasattr(element, 'modifiers') else []
+            # Include calls in detailed analysis
+            info["calls"] = self._get_node_calls(element)
 
         return info
 
@@ -1714,8 +1714,7 @@ class SolidityQueryEngineV2:
         """Filter by operators used."""
         filtered = []
         for node in nodes:
-            source = node.get_source_code() if hasattr(node, 'get_source_code') else ''
-            if source and any(op in source for op in operators):
+            if self._node_uses_operators(node, operators):
                 filtered.append(node)
         return filtered
 
@@ -1801,7 +1800,7 @@ class SolidityQueryEngineV2:
                         calls.append(call_info)
                         found_calls.add(call_key)
                         
-            elif node_type == "member_access":
+            elif node_type in ["member_access", "member_expression"]:
                 # Check if this member access is part of a low-level call
                 member_call = self._analyze_member_call(ts_node)
                 if member_call:
@@ -1823,15 +1822,15 @@ class SolidityQueryEngineV2:
             # Find the function being called
             function_node = None
             
-            # First check direct children for identifier/member_access
+            # First check direct children for identifier/member_access/member_expression
             for child in ts_node.children:
-                if child.type in ["identifier", "member_access"]:
+                if child.type in ["identifier", "member_access", "member_expression"]:
                     function_node = child
                     break
                 # Also check inside expression nodes
                 elif child.type == "expression":
                     for expr_child in child.children:
-                        if expr_child.type in ["identifier", "member_access"]:
+                        if expr_child.type in ["identifier", "member_access", "member_expression"]:
                             function_node = expr_child
                             break
                     if function_node:
@@ -1897,13 +1896,17 @@ class SolidityQueryEngineV2:
         if call_name in builtin_functions:
             return 'builtin'
             
-        # Low-level calls
+        # Member access calls (contract.method or address.method)
         if '.' in call_name:
             parts = call_name.split('.')
             method = parts[-1]
-            if method in {'call', 'delegatecall', 'staticcall', 'send', 'transfer'}:
+            
+            # True low-level calls on addresses
+            if method in {'call', 'delegatecall', 'staticcall', 'send'}:
                 return 'low_level'
             else:
+                # All other member access calls are considered external
+                # This includes transfer(), approve(), balanceOf(), etc.
                 return 'external'
         
         # Library calls (if the function name suggests it)
@@ -1916,14 +1919,12 @@ class SolidityQueryEngineV2:
     def _count_call_arguments(self, call_node) -> int:
         """Count the number of arguments in a function call."""
         try:
+            # Tree-sitter uses call_argument nodes directly as children
+            arg_count = 0
             for child in call_node.children:
-                if child.type == "arguments":
-                    # Count comma-separated arguments
-                    arg_count = 0
-                    for arg_child in child.children:
-                        if arg_child.type != "," and arg_child.type not in ["(", ")"]:
-                            arg_count += 1
-                    return arg_count
+                if child.type == "call_argument":
+                    arg_count += 1
+            return arg_count
         except Exception:
             pass
         return 0
@@ -1979,7 +1980,7 @@ class SolidityQueryEngineV2:
                 return
             
             # Handle member access first (e.g., msg.sender, block.timestamp)
-            if node_type == "member_access":
+            if node_type in ["member_access", "member_expression"]:
                 member_info = self._analyze_member_access(ts_node)
                 if member_info and member_info['name'] not in found_vars:
                     variables.append(member_info)
@@ -2157,24 +2158,139 @@ class SolidityQueryEngineV2:
         return None
     
     def _classify_variable_type(self, var_name: str, context: Optional[str]) -> Optional[str]:
-        """Classify variable type based on name and context."""
-        # All variables that make it to this point are likely state variables
-        # (since we've filtered out keywords, types, and built-ins)
+        """Classify variable type based on context only, no patterns."""
         
-        # Additional filtering based on common patterns
-        if len(var_name) <= 2:  # Very short names are usually parameters
-            return None
-            
-        # Context-based classification
+        # Context-based classification only
         if context == 'index_access':
-            # Variables being indexed (e.g., balances[user]) are state variables
-            return 'state_variable'
+            return 'array_access'
         elif context == 'member_access':
-            # Member access base objects (e.g., contract.method) could be contract references
-            return 'state_variable'
-        else:
-            # Default: assume it's a state variable if we got this far
-            return 'state_variable'
+            return 'member_reference'
+            
+        # Return generic type for all other variables
+        return 'variable'
+    
+    def _find_variable_declaration(self, var_name: str) -> Optional[Dict[str, str]]:
+        """Find variable declaration using AST traversal."""
+        
+        # Search through all loaded AST nodes for variable declarations
+        for contract in self.parser.parsed_contracts:
+            for node in contract.all_nodes:
+                # Check state variable declarations
+                if hasattr(node, 'node_type') and 'VariableDeclaration' in str(node.node_type):
+                    if hasattr(node, 'name') and node.name == var_name:
+                        # Check if it's a state variable (declared at contract level)
+                        if hasattr(node, 'is_state_variable') and node.is_state_variable:
+                            visibility = getattr(node, 'visibility', 'internal')
+                            if visibility in ['public', 'external']:
+                                return {'type': 'public_state_variable'}
+                            else:
+                                return {'type': 'state_variable'}
+                        else:
+                            return {'type': 'local_variable'}
+                
+                # Check function parameters
+                elif hasattr(node, 'node_type') and 'FunctionDeclaration' in str(node.node_type):
+                    if hasattr(node, 'parameters'):
+                        for param in node.parameters:
+                            if hasattr(param, 'name') and param.name == var_name:
+                                return {'type': 'parameter'}
+                
+                # Check struct members, enum values, etc.
+                elif hasattr(node, 'node_type') and 'StructDeclaration' in str(node.node_type):
+                    if hasattr(node, 'members'):
+                        for member in node.members:
+                            if hasattr(member, 'name') and member.name == var_name:
+                                return {'type': 'struct_member'}
+        
+        return None
+    
+    def _is_builtin_global_access(self, ts_node) -> bool:
+        """Check if this is a built-in global access using AST structure."""
+        if not ts_node or not ts_node.children:
+            return False
+            
+        # Check if this is msg.*, block.*, tx.* access
+        children = [child for child in ts_node.children if child.type == 'identifier']
+        if len(children) >= 1:
+            base_name = children[0].text.decode('utf-8') if children[0].text else ''
+            return base_name in ['msg', 'block', 'tx', 'abi', 'address']
+        return False
+    
+    def _is_low_level_call(self, ts_node) -> bool:
+        """Check if this is a low-level call using AST structure."""
+        member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+        if not member_text or '.' not in member_text:
+            return False
+            
+        # Extract method name from AST structure
+        for child in ts_node.children:
+            if child.type == 'identifier':
+                method_name = child.text.decode('utf-8') if child.text else ''
+                # Check the last identifier for low-level methods
+                if method_name in ['call', 'delegatecall', 'staticcall', 'send']:
+                    return True
+        return False
+    
+    def _is_external_contract_call(self, ts_node) -> bool:
+        """Check if this is an external contract call using AST structure."""
+        # If it's not a built-in global and has a dot, likely external
+        return not self._is_builtin_global_access(ts_node)
+    
+    def _is_update_expression(self, ts_node) -> bool:
+        """Check if this is an update expression (++/--) using AST structure."""
+        # Look for increment/decrement operators in the node's children
+        for child in ts_node.children:
+            if child.type in ["++", "--", "increment_expression", "decrement_expression"]:
+                return True
+        return False
+    
+    def _node_uses_operators(self, node: ASTNode, operators: List[str]) -> bool:
+        """Check if node uses specific operators using AST analysis."""
+        if not hasattr(node, 'raw_node') or not node.raw_node:
+            return False
+        
+        def check_operators(ts_node) -> bool:
+            if not ts_node:
+                return False
+                
+            # Map operator strings to AST node types
+            operator_node_types = {
+                '+': ['binary_expression'],
+                '-': ['binary_expression'],  
+                '*': ['binary_expression'],
+                '/': ['binary_expression'],
+                '%': ['binary_expression'],
+                '++': ['update_expression', 'increment_expression'],
+                '--': ['update_expression', 'decrement_expression'],
+                '+=': ['augmented_assignment_operator'],
+                '-=': ['augmented_assignment_operator'],
+                '*=': ['augmented_assignment_operator'],
+                '/=': ['augmented_assignment_operator'],
+                '==': ['binary_expression'],
+                '!=': ['binary_expression'],
+                '<': ['binary_expression'],
+                '>': ['binary_expression'],
+                '<=': ['binary_expression'],
+                '>=': ['binary_expression'],
+                '&&': ['binary_expression'],
+                '||': ['binary_expression'],
+                '!': ['unary_expression']
+            }
+            
+            # Check if this node type matches any requested operators
+            for op in operators:
+                if op in operator_node_types:
+                    if ts_node.type in operator_node_types[op]:
+                        return True
+            
+            # Recursively check children
+            for child in ts_node.children:
+                if check_operators(child):
+                    return True
+                    
+            return False
+        
+        return check_operators(node.raw_node)
     
     def _determine_access_type(self, ts_node) -> str:
         """Determine if this is a read or write access."""

@@ -7,7 +7,7 @@
 The V2 engine provides a streamlined, super-powerful interface with just three core methods that handle all query types:
 
 1. **`query_code()`** - Universal query function for any Solidity construct
-2. **`get_details()`** - Detailed element analysis with multiple depth levels  
+2. **`get_details()`** - Detailed element analysis with multiple depth levels
 3. **`find_references()`** - Reference and relationship analysis with call graphs
 
 This optimized design supports all security analysis patterns from advanced security frameworks while maintaining simplicity and high performance.
@@ -29,7 +29,7 @@ SolidityQueryEngineV2(source_paths: Optional[Union[str, Path, List[Union[str, Pa
 **Parameters:**
 - `source_paths`: Optional path(s) to load initially
   - Single file: `"/path/to/contract.sol"`
-  - Directory: `"/path/to/contracts"`  
+  - Directory: `"/path/to/contracts"`
   - Multiple paths: `["/path/to/contract1.sol", "/path/to/contracts_dir"]`
 
 **Example:**
@@ -65,8 +65,8 @@ engine.load_sources("/path/to/contracts")
 
 # Load multiple sources
 engine.load_sources([
-    "contracts/Token.sol", 
-    "contracts/interfaces/", 
+    "contracts/Token.sol",
+    "contracts/interfaces/",
     "/path/to/external/libs"
 ])
 ```
@@ -107,7 +107,6 @@ The type of Solidity construct to query:
 | `"errors"` | Error declarations | Find custom errors |
 | `"structs"` | Struct declarations | Find data structures |
 | `"enums"` | Enum declarations | Find enumeration types |
-| `"flow"` | Control flow elements | Find loops and branches |
 
 **`filters`** *(dict, optional)*
 Advanced filtering criteria:
@@ -130,6 +129,7 @@ Advanced filtering criteria:
 | `call_types` | `List[str]` | Types of calls | `["external", "low_level"]` |
 | `low_level` | `bool` | Low-level calls (call/delegatecall) | `True` |
 | `access_patterns` | `List[str]` | Variable access patterns | `["read", "write"]` |
+| `field_patterns` | `List[str]` | Field pattern matching | `["msg.sender", "balance"]` |
 
 **`scope`** *(dict, optional)*
 Limit search scope:
@@ -196,9 +196,7 @@ Returns a standardized response dictionary:
         "performance": {...}            # Performance metrics
     },
     "warnings": [],                     # Any warnings
-    "errors": [],                       # Any errors
-    "suggestions": [],                  # Query optimization suggestions
-    "related_queries": []               # Related query suggestions
+    "errors": []                        # Any errors
 }
 ```
 
@@ -270,7 +268,6 @@ for stmt in result['data']['results']:
 get_details(
     element_type: str,
     identifiers: List[str],
-    analysis_depth: str = "basic",
     include_context: bool = True,
     options: Dict[str, Any] = {}
 ) -> Dict[str, Any]
@@ -298,15 +295,6 @@ List of element identifiers to analyze. Supports multiple formats:
 - Function signatures: `["transfer(address,uint256)", "approve(address,uint256)"]`
 - Contract.element format: `["Token.transfer", "Vault.withdraw"]`
 - File:contract format: `["contracts/Token.sol:MyToken"]`
-
-**`analysis_depth`** *(string, optional, default: "basic")*
-Level of analysis to perform:
-
-| Depth | Description | Includes |
-|-------|-------------|----------|
-| `"basic"` | Essential information | Name, type, location, signature |
-| `"detailed"` | Comprehensive details | + source code, visibility, modifiers, types |
-| `"comprehensive"` | Full analysis | + dependencies, call graphs, data flow, security analysis |
 
 **`include_context`** *(boolean, optional, default: True)*
 Whether to include surrounding context and relationships.
@@ -336,16 +324,13 @@ Analysis options:
         "elements": {
             "identifier1": {
                 "found": bool,
-                "basic_info": {...},         # Always included
-                "detailed_info": {...},     # If depth >= "detailed"  
-                "comprehensive_info": {...}, # If depth == "comprehensive"
+                "element_info": {...},       # Element details
                 "context": {...}            # If include_context=True
             },
             "identifier2": {...}
         },
         "analysis_summary": {
             "elements_found": int,
-            "analysis_depth": str,
             "features_analyzed": [...],
             "success_rate": float
         }
@@ -363,66 +348,59 @@ Analysis options:
 
 **Basic Function Analysis:**
 ```python
-# Analyze transfer functions at basic level
-result = engine.get_details("function", ["transfer", "transferFrom"], 
-                           analysis_depth="basic")
+# Analyze transfer functions
+result = engine.get_details("function", ["transfer", "transferFrom"])
 
 for name, analysis in result['data']['elements'].items():
     if analysis['found']:
-        info = analysis['basic_info']
+        info = analysis['element_info']
         print(f"{name}: {info['signature']} at {info['location']['file']}:{info['location']['line']}")
 ```
 
 **Detailed Contract Analysis:**
 ```python
 # Deep analysis of a token contract
-result = engine.get_details("contract", ["MyToken"], 
-                           analysis_depth="detailed",
-                           include_context=True)
+result = engine.get_details("contract", ["MyToken"], include_context=True)
 
 contract_info = result['data']['elements']['MyToken']
 if contract_info['found']:
-    basic = contract_info['basic_info']
-    detailed = contract_info['detailed_info']
-    
-    print(f"Contract: {basic['name']}")
-    print(f"Type: {basic['type']}")
-    print(f"Functions: {len(detailed.get('functions', []))}")
-    print(f"State Variables: {len(detailed.get('variables', []))}")
+    element_info = contract_info['element_info']
+
+    print(f"Contract: {element_info['name']}")
+    print(f"Type: {element_info['type']}")
+    print(f"Functions: {len(element_info.get('functions', []))}")
+    print(f"State Variables: {len(element_info.get('variables', []))}")
 ```
 
 **Comprehensive Security Analysis:**
 ```python
-# Full security analysis of critical functions
-result = engine.get_details("function", 
+# Security analysis of critical functions
+result = engine.get_details("function",
     ["withdraw", "emergencyWithdraw", "claim"],
-    analysis_depth="comprehensive",
     options={"show_call_chains": True})
 
 for name, analysis in result['data']['elements'].items():
     if analysis['found']:
-        security = analysis['comprehensive_info']['security_analysis']
-        print(f"{name} security risks:")
-        print(f"  Risk level: {security['risk_level']}")
-        print(f"  Issues found: {len(security['issues'])}")
-        for issue in security['issues']:
-            print(f"    - {issue['type']}: {issue['severity']}")
+        element_info = analysis['element_info']
+        print(f"{name} details:")
+        print(f"  Location: {element_info['location']}")
+        print(f"  Signature: {element_info.get('signature', 'N/A')}")
+        print(f"  Visibility: {element_info.get('visibility', 'N/A')}")
 ```
 
 **Variable State Analysis:**
 ```python
 # Analyze state variables and their usage
-result = engine.get_details("variable", 
-    ["_balances", "totalSupply", "owner"],
-    analysis_depth="comprehensive")
+result = engine.get_details("variable",
+    ["_balances", "totalSupply", "owner"])
 
 for name, analysis in result['data']['elements'].items():
     if analysis['found']:
-        data_flow = analysis['comprehensive_info']['data_flow']
+        element_info = analysis['element_info']
         print(f"{name}:")
-        print(f"  Read by: {data_flow['variables_read']}")
-        print(f"  Written by: {data_flow['variables_written']}")
-        print(f"  State changes: {data_flow['state_changes']}")
+        print(f"  Type: {element_info.get('type', 'N/A')}")
+        print(f"  Visibility: {element_info.get('visibility', 'N/A')}")
+        print(f"  Location: {element_info['location']}")
 ```
 
 ---
@@ -437,7 +415,7 @@ find_references(
     target_type: str,
     reference_type: str = "all",
     direction: str = "both",
-    max_depth: int = -1,
+    max_depth: int = 5,
     filters: Dict[str, Any] = {},
     options: Dict[str, Any] = {}
 ) -> Dict[str, Any]
@@ -483,11 +461,11 @@ Analysis direction:
 | `"backward"` | Find what calls/uses this element |
 | `"both"` | Bidirectional analysis |
 
-**`max_depth`** *(integer, optional, default: -1)*
+**`max_depth`** *(integer, optional, default: 5)*
 Maximum search depth:
-- `-1`: Unlimited depth (follows all chains)
 - `1`: Direct references only
 - `2+`: Multi-level reference chains
+- Higher values: Deeper reference chains
 
 **`filters`** *(dict, optional)*
 Filter found references:
@@ -571,13 +549,13 @@ Analysis options:
 **Function Usage Analysis:**
 ```python
 # Find all places where 'transfer' function is called
-result = engine.find_references("transfer", "function", 
+result = engine.find_references("transfer", "function",
                                reference_type="usages")
 
 if result['success']:
     usages = result['data']['references']['usages']
     print(f"Found {len(usages)} usages of transfer function:")
-    
+
     for usage in usages:
         loc = usage['location']
         print(f"- {loc['contract']}.{loc['function']} at line {loc['line']}")
@@ -612,7 +590,7 @@ result = engine.find_references("emergencyWithdraw", "function",
 if result['success']:
     chains = result['data']['references']['call_chains']
     print(f"Found {len(chains)} call chains:")
-    
+
     for i, chain in enumerate(chains):
         print(f"Chain {i+1}: {' -> '.join(chain)}")
 ```
@@ -627,10 +605,10 @@ result = engine.find_references("IERC20", "contract",
 if result['success']:
     usages = result['data']['references']['usages']
     contracts_using = set()
-    
+
     for usage in usages:
         contracts_using.add(usage['location']['contract'])
-    
+
     print(f"IERC20 interface used by {len(contracts_using)} contracts:")
     for contract in contracts_using:
         print(f"- {contract}")
@@ -648,7 +626,7 @@ for func in external_funcs[:5]:  # Analyze first 5 functions
                                    direction="forward",
                                    max_depth=2,
                                    options={"show_call_chains": True})
-    
+
     if result['success']:
         chains = result['data']['references']['call_chains']
         print(f"External call chains from {func['name']}:")
@@ -682,8 +660,7 @@ All methods return standardized error responses when issues occur:
         "validation_errors": [...]    # Detailed validation errors
     },
     "data": None,
-    "errors": [...],                  # Error messages
-    "suggestions": [...]              # Fix suggestions
+    "errors": [...]                   # Error messages
 }
 ```
 
@@ -696,234 +673,4 @@ if not result['success']:
     print("Query failed:")
     for error in result['errors']:
         print(f"- {error}")
-    
-    print("Suggestions:")
-    for suggestion in result['suggestions']:
-        print(f"- {suggestion}")
 ```
-
----
-
-## Performance Optimization
-
-### Best Practices
-
-1. **Use Specific Filters Early:**
-   ```python
-   # Good: Specific contract filter first
-   engine.query_code("functions", {"contracts": ["MyToken"]})
-   
-   # Less efficient: Broad search then filter
-   engine.query_code("functions", {})  # Then manually filter results
-   ```
-
-2. **Limit Results:**
-   ```python
-   # For exploration, limit results
-   result = engine.query_code("functions", {}, 
-                             options={"max_results": 50})
-   ```
-
-3. **Choose Appropriate Analysis Depth:**
-   ```python
-   # Use "basic" when you only need names and locations
-   engine.get_details("function", ["transfer"], analysis_depth="basic")
-   
-   # Use "comprehensive" only when you need full analysis
-   engine.get_details("function", ["withdraw"], analysis_depth="comprehensive")
-   ```
-
-4. **Scope Queries Effectively:**
-   ```python
-   # Limit scope to relevant contracts
-   engine.query_code("functions", 
-                     {"has_external_calls": True},
-                     scope={"contracts": ["*Token*", "*Vault*"]})
-   ```
-
-### Performance Monitoring
-
-Monitor query performance using the returned metadata:
-
-```python
-result = engine.query_code("functions", {"visibility": "external"})
-
-perf = result['metadata']['performance']
-print(f"Query took {result['query_info']['execution_time']:.3f}s")
-print(f"Found {perf['total_results']} results")
-print(f"Analyzed {perf['files_processed']} files")
-```
-
----
-
-## Security Analysis Patterns
-
-The V2 API is optimized for security analysis workflows. Here are common patterns:
-
-### Reentrancy Detection
-
-```python
-# Find functions vulnerable to reentrancy
-result = engine.query_code("functions", {
-    "has_external_calls": True,
-    "changes_state": True,
-    "visibility": ["public", "external"]
-}, include=["source", "calls"])
-
-for func in result['data']['results']:
-    # Analyze each function for reentrancy patterns
-    details = engine.get_details("function", [func['name']], 
-                                analysis_depth="comprehensive")
-    
-    security = details['data']['elements'][func['name']]['comprehensive_info']['security_analysis']
-    if security['risk_level'] == 'high':
-        print(f"High risk: {func['location']['contract']}.{func['name']}")
-```
-
-### Access Control Analysis
-
-```python
-# Find public/external functions without access control
-result = engine.query_code("functions", {
-    "visibility": ["public", "external"],
-    "modifiers": []  # No modifiers
-})
-
-unprotected = result['data']['results']
-print(f"Found {len(unprotected)} unprotected functions")
-```
-
-### Asset Flow Analysis
-
-```python
-# Trace asset transfers through the system
-transfer_funcs = engine.query_code("functions", {
-    "has_asset_transfers": True
-})['data']['results']
-
-for func in transfer_funcs:
-    # Find what calls this transfer function
-    refs = engine.find_references(func['name'], "function", 
-                                 reference_type="usages")
-    
-    print(f"{func['name']} called by {len(refs['data']['references']['usages'])} functions")
-```
-
----
-
-## Integration Examples
-
-### Export for Analysis Tools
-
-```python
-# Export comprehensive analysis for external tools
-functions = engine.query_code("functions", 
-                              {"visibility": ["public", "external"]},
-                              include=["source", "calls", "variables"])
-
-# Format for security analysis tools
-security_data = []
-for func in functions['data']['results']:
-    details = engine.get_details("function", [func['name']], 
-                                analysis_depth="comprehensive")
-    
-    if details['success']:
-        func_details = details['data']['elements'][func['name']]
-        security_data.append({
-            'name': func['name'],
-            'contract': func['location']['contract'],
-            'signature': func.get('signature', ''),
-            'risks': func_details['comprehensive_info']['security_analysis']['issues'],
-            'external_calls': len(func.get('calls', [])),
-            'source': func.get('source_code', '')
-        })
-
-# Export to JSON
-import json
-with open('security_analysis.json', 'w') as f:
-    json.dump(security_data, f, indent=2)
-```
-
-### Custom Analysis Pipeline
-
-```python
-def analyze_contract_security(engine, contract_name):
-    """Complete security analysis pipeline for a contract."""
-    
-    # Step 1: Get all functions in the contract
-    functions = engine.query_code("functions", {
-        "contracts": [contract_name],
-        "visibility": ["public", "external"]
-    })
-    
-    # Step 2: Analyze each function in detail
-    func_names = [f['name'] for f in functions['data']['results']]
-    details = engine.get_details("function", func_names,
-                                analysis_depth="comprehensive")
-    
-    # Step 3: Find cross-function references
-    call_graph = {}
-    for func_name in func_names:
-        refs = engine.find_references(func_name, "function",
-                                     direction="both",
-                                     options={"show_call_chains": True})
-        call_graph[func_name] = refs['data']['references']
-    
-    # Step 4: Compile security report
-    security_report = {
-        'contract': contract_name,
-        'total_functions': len(func_names),
-        'high_risk_functions': [],
-        'call_graph': call_graph,
-        'recommendations': []
-    }
-    
-    for func_name, analysis in details['data']['elements'].items():
-        if analysis['found']:
-            security = analysis['comprehensive_info']['security_analysis']
-            if security['risk_level'] == 'high':
-                security_report['high_risk_functions'].append({
-                    'name': func_name,
-                    'issues': security['issues'],
-                    'recommendations': security['recommendations']
-                })
-    
-    return security_report
-
-# Usage
-report = analyze_contract_security(engine, "MyToken")
-print(f"Security analysis for {report['contract']}:")
-print(f"High risk functions: {len(report['high_risk_functions'])}")
-```
-
----
-
-## Version Compatibility
-
-The V2 API is designed to coexist with the V1 traditional/fluent APIs:
-
-```python
-# V1 Traditional API
-from sol_query import SolidityQueryEngine
-v1_engine = SolidityQueryEngine("contracts/")
-contracts = v1_engine.find_contracts(name_patterns="*Token*")
-
-# V2 Optimized API  
-from sol_query.query.engine_v2 import SolidityQueryEngineV2
-v2_engine = SolidityQueryEngineV2("contracts/")
-result = v2_engine.query_code("contracts", {"names": ["*Token*"]})
-
-# Both can load the same sources and provide equivalent results
-# Choose based on your use case:
-# - V1 for traditional workflows and fluent chaining
-# - V2 for performance, security analysis, and advanced filtering
-```
-
-The V2 API provides the same core functionality as V1 but with:
-- **Better Performance**: Optimized three-method interface
-- **Enhanced Security**: Built-in security analysis patterns  
-- **Standardized Responses**: Consistent response format
-- **Advanced Filtering**: More powerful filtering capabilities
-- **Comprehensive Analysis**: Multi-level analysis depths
-
-Choose V2 for new projects requiring advanced security analysis and high performance.

@@ -37,9 +37,8 @@ result = engine.query_code("functions", {
     "names": ["*transfer*", "*withdraw*"]
 })
 
-# Multi-depth element analysis
-details = engine.get_details("function", ["emergencyWithdraw"], 
-                            analysis_depth="comprehensive")
+# Detailed element analysis
+details = engine.get_details("function", ["emergencyWithdraw"])
 
 # Reference tracking and call graphs
 refs = engine.find_references("totalSupply", "variable", 
@@ -90,10 +89,11 @@ import_deps = engine.analyze_imports("*OpenZeppelin*")
 
 ### ⚡ **V2 Performance Optimizations**
 - **Three Core Methods**: Universal `query_code()`, detailed `get_details()`, reference `find_references()`
-- **Advanced Filtering**: 20+ filter types with regex and wildcard support
-- **Multi-depth Analysis**: Basic, detailed, and comprehensive analysis levels
+- **Advanced Filtering**: 13+ filter types with regex and wildcard support
+- **Comprehensive Analysis**: Detailed element information with contextual data
 - **Security Patterns**: Built-in detection for reentrancy, access control, and asset flow
-- **Standardized Responses**: Consistent JSON format with metadata and suggestions
+- **Standardized Responses**: Consistent JSON format with metadata and performance metrics
+- **Optimized Codebase**: Clean, redundancy-free implementation for maximum performance
 
 ### 🛡️ **Advanced Security Analysis**
 - **External Call Detection**: Identify functions making cross-contract calls
@@ -181,16 +181,26 @@ for func in unprotected_external:
     print(f"  {func.parent_contract.name}.{func.name}")
 ```
 
+## 🆕 Recent Improvements
+
+**Latest Updates:**
+- **Updated V2 API Documentation**: API reference now accurately reflects implementation
+- **Codebase Cleanup**: Removed redundant test files and cleaned up imports
+- **Performance Optimizations**: Streamlined codebase with better organization
+- **Enhanced Documentation**: Focused API documentation on core interface and parameters
+
 ## 🔬 Technical Architecture
 
-Sol-Query is built on a robust, extensible architecture:
+Sol-Query is built on a robust, extensible architecture with recent optimizations:
 
 - **Tree-sitter Parser**: Robust parsing that handles incomplete/malformed code
 - **Type-safe AST**: Pydantic models ensure data integrity and validation
+- **Dual Engine Architecture**: V1 (traditional/fluent) and V2 (optimized) engines
 - **Analysis Pipeline**: Modular analyzers for calls, data flow, and imports
 - **Collection Framework**: Chainable, type-safe collections with set operations
 - **Pattern Engine**: Flexible matching with wildcards, regex, and exact patterns
 - **Memory Efficient**: Lazy evaluation and caching for large codebases
+- **Clean Codebase**: Redundancy-free implementation with comprehensive test coverage
 
 ## 📄 License
 

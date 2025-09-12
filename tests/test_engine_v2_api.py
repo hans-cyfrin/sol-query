@@ -476,7 +476,6 @@ class TestSolidityQueryEngineV2API:
         assert result["data"] is None
         assert "errors" in result
         assert len(result["errors"]) > 0
-        assert "suggestions" in result
         
         # Check validation_errors structure
         if "validation_errors" in result["query_info"]:
@@ -500,8 +499,6 @@ class TestSolidityQueryEngineV2API:
         assert "analysis_scope" in metadata
         assert "filters_applied" in metadata
         assert "performance" in metadata
-        assert "suggestions" in metadata
-        assert "related_queries" in metadata
         
         # Check performance structure
         performance = metadata["performance"]
@@ -540,13 +537,9 @@ class TestSolidityQueryEngineV2API:
         assert "cache_hit" in result["query_info"]
         assert isinstance(result["query_info"]["cache_hit"], bool)
 
-    def test_suggestions_and_related_queries(self, engine):
-        """Test that suggestions and related queries are provided."""
+    def test_metadata_structure(self, engine):
+        """Test that metadata structure is correct."""
         with patch.object(engine, '_get_nodes_by_query_type', return_value=[]):
             result = engine.query_code("functions")
         
         metadata = result["metadata"]
-        assert "suggestions" in metadata
-        assert "related_queries" in metadata
-        assert isinstance(metadata["suggestions"], list)
-        assert isinstance(metadata["related_queries"], list)

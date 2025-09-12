@@ -176,8 +176,6 @@ class SolidityQueryEngineV2:
                         "files_processed": len(self.source_manager.files),
                         "memory_usage": "N/A"
                     },
-                    "suggestions": self._get_query_suggestions(query_type, filters),
-                    "related_queries": self._get_related_queries(query_type, filters)
                 },
                 "warnings": [],
                 "errors": []
@@ -1000,8 +998,7 @@ class SolidityQueryEngineV2:
                 })
             elif isinstance(node, VariableDeclaration):
                 result_item.update({
-                    "variable_type": str(getattr(node, 'type_name', '')),
-                    "type_name": str(getattr(node, 'type_name', '')),  # Keep for backward compatibility
+                    "type_name": str(getattr(node, 'type_name', '')),
                     "visibility": getattr(node, 'visibility', None).value if hasattr(getattr(node, 'visibility', None), 'value') else (str(getattr(node, 'visibility', '')) or None),
                     "is_state_variable": (node.is_state_variable() if hasattr(node, 'is_state_variable') and callable(getattr(node, 'is_state_variable')) else (getattr(node, 'visibility', None) is not None))
                 })
@@ -1593,30 +1590,6 @@ class SolidityQueryEngineV2:
             "scope_applied": scope
         }
 
-    def _get_query_suggestions(self, query_type: str, filters: Dict[str, Any]) -> List[str]:
-        """Get query optimization suggestions."""
-        suggestions = []
-
-        if not filters:
-            suggestions.append(f"Consider adding filters to narrow down {query_type} results")
-
-        if query_type == "functions" and "visibility" not in filters:
-            suggestions.append("Add visibility filter to focus on public/external functions")
-
-        return suggestions
-
-    def _get_related_queries(self, query_type: str, _filters: Dict[str, Any]) -> List[str]:
-        """Get suggestions for related queries."""
-        related = []
-
-        if query_type == "functions":
-            related.append("query_code('calls', filters={'in_functions': results})")
-            related.append("query_code('variables', filters={'function_context': results})")
-
-        elif query_type == "contracts":
-            related.append("query_code('functions', filters={'contracts': results})")
-
-        return related
 
     def _create_error_response(self, function_name: str, parameters: Dict[str, Any],
                              errors: List[Union[str, Dict[str, Any]]]) -> Dict[str, Any]:
@@ -1654,10 +1627,6 @@ class SolidityQueryEngineV2:
             },
             "warnings": [],
             "errors": formatted_errors,
-            "suggestions": [
-                "Check parameter documentation",
-                f"Use {function_name}() with broader filters to understand project structure"
-            ]
         }
 
     def _handle_exception(self, function_name: str, parameters: Dict[str, Any],
@@ -2910,13 +2879,25 @@ class SolidityQueryEngineV2:
 
     def _get_element_context(self, element: ASTNode) -> Dict[str, Any]:
         """Get context information for an element."""
+        # Get source code with preview for long functions
+        source_code = element.get_source_code() if hasattr(element, 'get_source_code') else ''
+        surrounding_code = self._create_code_preview(source_code)
+
+        # Get file context from source_location
+        file_context = {
+            "file_path": None,
+            "line_number": None,
+            "contract": None
+        }
+
+        if hasattr(element, 'source_location') and element.source_location:
+            file_context["file_path"] = str(element.source_location.file_path) if element.source_location.file_path else None
+            file_context["line_number"] = element.source_location.start_line
+            file_context["contract"] = self._get_contract_name_from_element(element)
+
         context = {
-            "surrounding_code": getattr(element, 'source_code', ''),
-            "file_context": {
-                "file_path": getattr(element, 'file_path', None),
-                "line_number": getattr(element, 'line_number', None),
-                "contract": getattr(element, 'contract', None)
-            }
+            "surrounding_code": surrounding_code,
+            "file_context": file_context
         }
 
         # Add parent/child relationships
@@ -2934,23 +2915,75 @@ class SolidityQueryEngineV2:
     def _get_sibling_elements(self, element: ASTNode) -> List[Dict[str, Any]]:
         """Get sibling elements for context."""
         siblings = []
-        element_contract = getattr(element, 'contract', None)
 
-        if element_contract:
-            # Get other elements in the same contract
-            same_type_nodes = self._get_all_nodes_by_element_type(
-                type(element).__name__.replace('Declaration', '').lower()
-            )
+        # Get the contract name for this element
+        element_contract = self._get_contract_name_from_element(element)
+        if not element_contract:
+            return siblings
 
-            for node in same_type_nodes[:5]:  # Limit to 5 siblings
-                if (node != element and
-                    getattr(node, 'contract', None) == element_contract):
+        # Get all nodes of the same type in the same contract
+        element_type = type(element).__name__.replace('Declaration', '').lower()
+        all_nodes = self._get_all_nodes()
+
+        for node in all_nodes:
+            if (node != element and
+                type(node).__name__.replace('Declaration', '').lower() == element_type):
+
+                # Check if this node is in the same contract
+                node_contract = self._get_contract_name_from_element(node)
+                if node_contract == element_contract:
                     siblings.append({
                         "name": getattr(node, 'name', None),
-                        "type": type(node).__name__
+                        "type": self._get_user_friendly_type(type(node).__name__),
+                        "location": self._get_node_location(node)
                     })
 
+                    # Limit to 5 siblings to avoid overwhelming output
+                    if len(siblings) >= 5:
+                        break
+
         return siblings
+
+    def _create_code_preview(self, source_code: str, max_length: int = 1000) -> str:
+        """Create a code preview with head and tail for long functions."""
+        if not source_code:
+            return ""
+
+        if len(source_code) <= max_length:
+            return source_code
+
+        # Split into lines for better preview
+        lines = source_code.split('\n')
+        if len(lines) <= 10:  # If few lines, just truncate
+            return source_code[:max_length] + "\n... [truncated]"
+
+        # Show first 5 lines and last 5 lines
+        head_lines = lines[:5]
+        tail_lines = lines[-5:]
+
+        preview = '\n'.join(head_lines)
+        preview += '\n... [truncated - showing middle section] ...\n'
+        preview += '\n'.join(tail_lines)
+
+        return preview
+
+    def _get_contract_name_from_element(self, element: ASTNode) -> Optional[str]:
+        """Get contract name from element's parent contract or context."""
+        # Try parent_contract first
+        if hasattr(element, 'parent_contract') and element.parent_contract:
+            return getattr(element.parent_contract, 'name', None)
+
+        # Try parent function's contract
+        if hasattr(element, 'parent_function') and element.parent_function:
+            parent_func = element.parent_function
+            if hasattr(parent_func, 'parent_contract') and parent_func.parent_contract:
+                return getattr(parent_func.parent_contract, 'name', None)
+
+        # For contract declarations, return their own name
+        if isinstance(element, ContractDeclaration):
+            return getattr(element, 'name', None)
+
+        return None
 
     def _get_element_dependencies(self, element: ASTNode) -> List[Dict[str, Any]]:
         """Get dependencies of an element."""

@@ -863,8 +863,6 @@ class TestResponseFormatConsistency:
         assert "analysis_scope" in metadata
         assert "filters_applied" in metadata
         assert "performance" in metadata
-        assert "suggestions" in metadata
-        assert "related_queries" in metadata
 
     def test_get_details_response_format(self, loaded_engine):
         """Test get_details response format consistency."""

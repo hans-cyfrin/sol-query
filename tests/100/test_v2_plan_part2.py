@@ -27,13 +27,45 @@ def test_22_statements_by_type(engine):
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     assert len(results) > 0
+    
+    # Validate the require statement found in SimpleContract.sol
+    for stmt in results:
+        assert stmt.get("type") == "ExtractedStatement"
+        location = stmt.get("location", {})
+        
+        # Should be from SimpleContract.sol
+        file_path = str(location.get("file", ""))
+        assert file_path.endswith("SimpleContract.sol")
+        
+        # Should be the require statement at line 12 (in onlyOwner modifier)
+        assert location.get("line") == 12
+        assert location.get("column") == 8  # Column position of require
+        
+        # Note: For statements, name and contract may be None as they represent code fragments
+        # But we can validate the location is correct
 
 
 def test_23_expressions_by_operators(engine):
     resp = engine.query_code("expressions", {"operators": ["+", "*", "=="]}, {"files": [".*ERC721WithImports.sol"]})
     print("Expressions(+,* ,== in ERC721WithImports):", resp)
     assert resp.get("success") is True
-    assert len(resp.get("data", {}).get("results", [])) > 0
+    results = resp.get("data", {}).get("results", [])
+    assert len(results) > 0
+    
+    # Validate expressions found in ERC721WithImports.sol
+    for expr in results:
+        assert expr.get("type") == "ExtractedExpression"
+        location = expr.get("location", {})
+        
+        # Should be from ERC721WithImports.sol
+        file_path = str(location.get("file", ""))
+        assert file_path.endswith("ERC721WithImports.sol")
+        
+        # Should have valid location information
+        assert isinstance(location.get("line"), int)
+        assert isinstance(location.get("column"), int)
+        
+        # Note: For expressions, name and contract may be None as they represent code fragments
 
 
 def test_24_functions_that_change_state(engine):

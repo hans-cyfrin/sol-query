@@ -339,210 +339,210 @@ engine.load_sources([
 
 ---
 
-### Use Cases 61–85: get_details
+### Use Cases 61–82: get_details
 
-61) Basic function details by name
+61) Function details by name
 - Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "basic" }
-- Expected: success=True; data.elements["transfer"].basic_info includes name/type/location/signature.
+- Params: { element_type: "function", identifiers: ["transfer"] }
+- Expected: success=True; data.elements["transfer"] includes basic_info (name/type/location/signature), detailed_info (visibility/state_mutability/modifiers/calls), and comprehensive_info (dependencies/call_graph/data_flow).
 
-62) Detailed function details by name
+62) Function details with options
 - Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "detailed" }
-- Expected: detailed_info includes visibility/state_mutability/modifiers and calls[] list.
+- Params: { element_type: "function", identifiers: ["transfer"], options: { include_source: True } }
+- Expected: detailed_info includes source_code along with visibility/state_mutability/modifiers and calls[] list.
 
-63) Comprehensive function details by name
+63) Function details by signature
 - Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "comprehensive" }
-- Expected: comprehensive_info includes dependencies, call_graph, and data_flow keys (populated per implementation logic).
+- Params: { element_type: "function", identifiers: ["transfer(address,uint256)"] }
+- Expected: signature-based matching resolves the function and returns comprehensive information including dependencies, call_graph, and data_flow keys.
 
-64) Basic contract details by name
+64) Contract details by name
 - Method: get_details
 - Params: { element_type: "contract", identifiers: ["Token"] }
-- Expected: basic_info with location; may include siblings/context.
+- Expected: comprehensive information including basic_info (location), detailed_info, and comprehensive_info (dependencies/call_graph); may include siblings/context.
 
-65) Detailed contract details with context
+65) Contract details with context
 - Method: get_details
-- Params: { element_type: "contract", identifiers: ["Token"], analysis_depth: "detailed", include_context: True }
-- Expected: detailed_info present; context.file_context and siblings[] populated.
+- Params: { element_type: "contract", identifiers: ["Token"], include_context: True }
+- Expected: context.file_context and siblings[] populated along with comprehensive analysis.
 
-66) Comprehensive contract details
+66) Contract details by file:contract pattern
 - Method: get_details
-- Params: { element_type: "contract", identifiers: ["Token"], analysis_depth: "comprehensive" }
-- Expected: comprehensive_info includes dependencies and call_graph fields.
+- Params: { element_type: "contract", identifiers: ["tests/fixtures/composition_and_imports/MultipleInheritance.sol:MultipleInheritance"] }
+- Expected: file path pattern + contract name resolves the element with comprehensive info.
 
 67) Variable details by name
 - Method: get_details
-- Params: { element_type: "variable", identifiers: ["totalSupply"], analysis_depth: "basic" }
-- Expected: variable basic_info with location; signature may be None.
+- Params: { element_type: "variable", identifiers: ["totalSupply"] }
+- Expected: comprehensive information including basic_info (location), detailed_info, and comprehensive_info; signature may be None.
 
 68) Modifier details by name
 - Method: get_details
-- Params: { element_type: "modifier", identifiers: ["onlyOwner"], analysis_depth: "detailed" }
-- Expected: detailed_info.source_code present when available; context shows parent/siblings if derivable.
+- Params: { element_type: "modifier", identifiers: ["onlyOwner"] }
+- Expected: comprehensive analysis with detailed_info.source_code present when available; context shows parent/siblings if derivable.
 
 69) Event details by name
 - Method: get_details
-- Params: { element_type: "event", identifiers: ["Transfer"], analysis_depth: "basic" }
-- Expected: basic_info with location/type.
+- Params: { element_type: "event", identifiers: ["Transfer"] }
+- Expected: comprehensive information including basic_info (location/type), detailed_info, and comprehensive_info.
 
 70) Error details by name
 - Method: get_details
-- Params: { element_type: "error", identifiers: ["InsufficientBalance"], analysis_depth: "basic" }
-- Expected: basic_info when present; not-found allowed.
+- Params: { element_type: "error", identifiers: ["InsufficientBalance"] }
+- Expected: comprehensive information when present; not-found allowed.
 
 71) Struct details by name
 - Method: get_details
-- Params: { element_type: "struct", identifiers: ["UserData"], analysis_depth: "basic" }
-- Expected: basic_info for struct elements.
+- Params: { element_type: "struct", identifiers: ["UserData"] }
+- Expected: comprehensive information for struct elements.
 
 72) Enum details by name
 - Method: get_details
-- Params: { element_type: "enum", identifiers: ["TokenState"], analysis_depth: "basic" }
-- Expected: basic_info for enum elements.
+- Params: { element_type: "enum", identifiers: ["TokenState"] }
+- Expected: comprehensive information for enum elements.
 
-73) Function details by signature
-- Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer(address,uint256)"], analysis_depth: "basic" }
-- Expected: signature-based matching resolves the function.
-
-74) Function details by contract.element
+73) Function details by contract.element
 - Method: get_details
 - Params: { element_type: "function", identifiers: ["Token.transfer"] }
-- Expected: identifier resolved via contract+name format.
+- Expected: identifier resolved via contract+name format with comprehensive information.
 
-75) Contract details by file:contract
+74) Multiple function identifiers mixed
 - Method: get_details
-- Params: { element_type: "contract", identifiers: ["tests/fixtures/composition_and_imports/MultipleInheritance.sol:MultipleInheritance"] }
-- Expected: file path pattern + contract name resolves the element.
+- Params: { element_type: "function", identifiers: ["approve", "balanceOf", "mint"] }
+- Expected: per-identifier found/not-found entries with comprehensive information for found ones.
 
-76) Multiple function identifiers mixed
+75) include_context=False
 - Method: get_details
-- Params: { element_type: "function", identifiers: ["approve", "balanceOf", "mint"], analysis_depth: "detailed" }
-- Expected: per-identifier found/not-found entries with detailed_info for found ones.
+- Params: { element_type: "function", identifiers: ["transfer"], include_context: False }
+- Expected: no context key for the element, only basic_info, detailed_info, and comprehensive_info.
 
-77) include_context=False
+76) Options: include_source=False
 - Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "detailed", include_context: False }
-- Expected: no context key for the element, only basic/detailed info.
-
-78) Options: include_source=False
-- Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "detailed", options: { include_source: False } }
+- Params: { element_type: "function", identifiers: ["transfer"], options: { include_source: False } }
 - Expected: detailed_info.source_code omitted or None.
 
-79) Options: include_signatures=True (default)
+77) Options: include_signatures=True (default)
 - Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "basic", options: { include_signatures: True } }
+- Params: { element_type: "function", identifiers: ["transfer"], options: { include_signatures: True } }
 - Expected: basic_info.signature present when derivable.
 
-80) Options: show_call_chains
+78) Options: show_call_chains
 - Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "comprehensive", options: { show_call_chains: True } }
+- Params: { element_type: "function", identifiers: ["transfer"], options: { show_call_chains: True } }
 - Expected: comprehensive_info.call_graph present. (Options flag accepted; output structure is unchanged.)
 
-81) Mixed element types batch (contracts and variables)
+79) Mixed element types batch (contracts and variables)
 - Method: get_details
 - Params: Multiple calls per type. For contracts: { element_type: "contract", identifiers: ["Token", "NFT"] }; For variables: { element_type: "variable", identifiers: ["owner", "balances"] }
-- Expected: per-call results typed appropriately.
+- Expected: per-call results typed appropriately with comprehensive information.
 
-82) Not-found identifiers
+80) Not-found identifiers
 - Method: get_details
 - Params: { element_type: "function", identifiers: ["nonexistentFunction"] }
 - Expected: elements.nonexistentFunction.found=False with error message.
 
-83) Analysis depth comparison
+81) Sibling context present
 - Method: get_details
-- Params: two calls for same identifier with analysis_depth "basic" vs "comprehensive"
-- Expected: comprehensive includes superset of keys compared to basic.
-
-84) Sibling context present
-- Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer"], analysis_depth: "basic", include_context: True }
+- Params: { element_type: "function", identifiers: ["transfer"], include_context: True }
 - Expected: context.siblings exists and lists nearby elements (limited to 5).
 
-85) Analysis summary fields
+82) Analysis summary fields
 - Method: get_details
-- Params: { element_type: "function", identifiers: ["transfer", "approve"], analysis_depth: "detailed" }
-- Expected: data.analysis_summary includes elements_found, elements_requested, analysis_depth, success_rate, features_analyzed.
+- Params: { element_type: "function", identifiers: ["transfer", "approve"] }
+- Expected: data.analysis_summary includes elements_found, elements_requested, success_rate, features_analyzed.
 
 ---
 
-### Use Cases 86–100: find_references
+### Use Cases 83–100: find_references
 
-86) References for a function (all)
+83) References for a function (all)
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", reference_type: "all" }
 - Expected: data.references.usages[], definitions[] present; metadata.performance available; success=True.
 
-87) Function usages only
+84) Function usages only
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", reference_type: "usages" }
 - Expected: references.usages populated where source references exist.
 
-88) Function definitions only
+85) Function definitions only
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", reference_type: "definitions" }
 - Expected: primary definition plus overrides/interface definitions when present.
 
-89) References direction forward
+86) References direction forward
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", direction: "forward" }
 - Expected: usages discovered in nodes after the target element.
 
-90) References direction backward
+87) References direction backward
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", direction: "backward" }
 - Expected: usages discovered in nodes before the target element.
 
-91) References both directions
+88) References both directions
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", direction: "both" }
 - Expected: union of forward/backward behaviors; may be superset of each.
 
-92) Max depth limit (1)
+89) Max depth limit (1)
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", direction: "both", max_depth: 1 }
 - Expected: traversal adheres to depth limit; metadata.performance.depth_reached reflects.
 
-93) Unlimited depth (-1)
+90) Unlimited depth (-1)
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", max_depth: -1 }
 - Expected: allowed by validation; depth may extend as far as relationships permit.
 
-94) With call chains
+91) With call chains
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", options: { show_call_chains: True }, max_depth: 3 }
 - Expected: data.references.call_chains is a list of sequences (best-effort).
 
-95) Variable references (all)
+92) Variable references (all)
 - Method: find_references
 - Params: { target: "balances", target_type: "variable", reference_type: "all" }
 - Expected: usages identified as assignment/array_access/member_access/variable_read; definitions include primary declaration.
 
-96) Contract references
+93) Contract references
 - Method: find_references
 - Params: { target: "Token", target_type: "contract", reference_type: "all" }
 - Expected: usages include instantiation or references in code; definitions show primary contract declaration.
 
-97) References filtered by contracts
+94) References filtered by contracts
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", filters: { contracts: [".*Token.*"] } }
 - Expected: only usages/definitions whose location.contract matches patterns.
 
-98) References filtered by files
+95) References filtered by files
 - Method: find_references
 - Params: { target: "transfer", target_type: "function", filters: { files: ["detailed_scenarios/.*"] } }
 - Expected: only locations from matching files.
 
-99) Non-existent target element
+96) Non-existent target element
 - Method: find_references
 - Params: { target: "doesNotExist", target_type: "function" }
 - Expected: success=False error response with errors[] indicating not found.
 
-100) Target types coverage (modifier/event/struct/enum)
+97) Target types coverage (modifier)
 - Method: find_references
-- Params: Repeat for each target_type among ["modifier", "event", "struct", "enum"], target set to a plausible name from fixtures
+- Params: { target: "onlyOwner", target_type: "modifier", reference_type: "all" }
+- Expected: structure of references object returned; empty lists allowed when not present.
+
+98) Target types coverage (event)
+- Method: find_references
+- Params: { target: "Transfer", target_type: "event", reference_type: "all" }
+- Expected: structure of references object returned; empty lists allowed when not present.
+
+99) Target types coverage (struct)
+- Method: find_references
+- Params: { target: "UserData", target_type: "struct", reference_type: "all" }
+- Expected: structure of references object returned; empty lists allowed when not present.
+
+100) Target types coverage (enum)
+- Method: find_references
+- Params: { target: "TokenState", target_type: "enum", reference_type: "all" }
 - Expected: structure of references object returned; empty lists allowed when not present.
 
 ---

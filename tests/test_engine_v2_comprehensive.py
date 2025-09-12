@@ -321,7 +321,7 @@ class TestGetDetailsBattleLevel:
         # Test basic analysis
         result = loaded_engine.get_details("function",
             ["deposit", "withdraw", "transfer"],
-            analysis_depth="basic")
+)
 
         assert result["success"] is True
 
@@ -335,7 +335,6 @@ class TestGetDetailsBattleLevel:
         # Test detailed analysis
         result = loaded_engine.get_details("function",
             ["deposit", "withdraw"],
-            analysis_depth="detailed",
             options={"include_source": True, "include_assembly": True})
 
         assert result["success"] is True
@@ -350,24 +349,22 @@ class TestGetDetailsBattleLevel:
         # Test comprehensive analysis
         result = loaded_engine.get_details("function",
             ["deposit"],
-            analysis_depth="comprehensive",
             options={"check_standards": True})
 
         assert result["success"] is True
 
         for identifier, analysis in result["data"]["elements"].items():
             if analysis.get("found"):
-                assert "comprehensive_info" in analysis
-                comprehensive = analysis["comprehensive_info"]
-                assert "dependencies" in comprehensive
-                assert "call_graph" in comprehensive
-                assert "security_analysis" in comprehensive
+                    assert "comprehensive_info" in analysis
+                    comprehensive = analysis["comprehensive_info"]
+                    assert "dependencies" in comprehensive
+                    assert "call_graph" in comprehensive
+                    assert "data_flow" in comprehensive
 
     def test_contract_analysis_comprehensive(self, loaded_engine):
         """Test comprehensive contract analysis."""
         result = loaded_engine.get_details("contract",
             ["Token", "RETHVault", "ComplexLogic"],
-            analysis_depth="comprehensive",
             include_context=True,
             options={"check_standards": True, "include_tests": False})
 
@@ -387,7 +384,6 @@ class TestGetDetailsBattleLevel:
         """Test detailed variable analysis."""
         result = loaded_engine.get_details("variable",
             ["_balances", "totalSupply", "userShares", "_totalSupply"],
-            analysis_depth="detailed",
             include_context=True)
 
         assert result["success"] is True
@@ -400,7 +396,7 @@ class TestGetDetailsBattleLevel:
         """Test function signature matching."""
         result = loaded_engine.get_details("function",
             ["transfer(address,uint256)", "deposit(uint256)", "balanceOf(address)"],
-            analysis_depth="detailed")
+)
 
         assert result["success"] is True
 
@@ -416,7 +412,7 @@ class TestGetDetailsBattleLevel:
         """Test contract.element qualified naming."""
         result = loaded_engine.get_details("function",
             ["Token.transfer", "RETHVault.deposit", "ComplexLogic.processNumbers"],
-            analysis_depth="basic")
+)
 
         assert result["success"] is True
 
@@ -669,7 +665,7 @@ class TestPerformanceAndEdgeCases:
             if function_names:
                 detailed_analysis = loaded_engine.get_details("function",
                     function_names,
-                    analysis_depth="comprehensive")
+)
 
                 assert detailed_analysis["success"] is True
 
@@ -724,11 +720,10 @@ class TestErrorHandlingAndValidation:
         assert result["success"] is False
         assert "validation_errors" in result["query_info"]
 
-    def test_invalid_analysis_depth(self, loaded_engine):
-        """Test handling of invalid analysis depth."""
-        result = loaded_engine.get_details("function",
-            ["transfer"],
-            analysis_depth="invalid_depth")
+    def test_invalid_element_type(self, loaded_engine):
+        """Test handling of invalid element type."""
+        result = loaded_engine.get_details("invalid_element_type",
+            ["transfer"])
 
         assert result["success"] is False
 
@@ -786,7 +781,7 @@ class TestRealWorldScenarios:
             critical_functions = [f["name"] for f in external_funcs["data"]["results"][:2]]
             detailed = loaded_engine.get_details("function",
                 critical_functions,
-                analysis_depth="comprehensive")
+)
 
             assert detailed["success"] is True
 
@@ -868,7 +863,7 @@ class TestResponseFormatConsistency:
         """Test get_details response format consistency."""
         result = loaded_engine.get_details("function",
             ["transfer"],
-            analysis_depth="detailed")
+)
 
         assert "success" in result
         assert "query_info" in result

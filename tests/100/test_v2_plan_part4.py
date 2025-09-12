@@ -1,8 +1,8 @@
 import json
 
-def test_61_basic_function_details(engine):
-    resp = engine.get_details("function", ["mint"], analysis_depth="basic")
-    print("get_details(function mint, basic):", json.dumps(resp, indent=2))
+def test_61_function_basic_info(engine):
+    resp = engine.get_details("function", ["mint"])
+    print("get_details(function mint):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate response structure
@@ -29,9 +29,9 @@ def test_61_basic_function_details(engine):
     assert bi.get("signature") == "mint(address)"
 
 
-def test_62_detailed_function_details(engine):
-    resp = engine.get_details("function", ["mint"], analysis_depth="detailed")
-    print("get_details(function mint, detailed):", json.dumps(resp, indent=2))
+def test_62_function_calls_and_modifiers(engine):
+    resp = engine.get_details("function", ["mint"])
+    print("get_details(function mint):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     el = resp["data"]["elements"]["mint"]
@@ -47,18 +47,23 @@ def test_62_detailed_function_details(engine):
     modifiers = di.get("modifiers", [])
     assert "nonReentrant" in modifiers
 
-    # Check calls made within mint function
+    # Check calls made within mint function (builtin calls like 'require' are excluded)
     calls = di.get("calls", [])
     call_names = [call.get("name") for call in calls]
-    # mint function should make these calls based on ERC721WithImports.sol
-    expected_calls = ["require", "_safeMint", "payable(msg.sender).transfer"]
+    # mint function should make these calls based on ERC721WithImports.sol (excluding builtins)
+    expected_calls = ["_safeMint", "payable(msg.sender).transfer"]
     for expected_call in expected_calls:
         assert any(expected_call in call_name for call_name in call_names), f"Expected call '{expected_call}' not found in {call_names}"
 
+    # Verify that builtin calls like 'require' are excluded
+    builtin_calls = ["require", "assert", "revert"]
+    for builtin_call in builtin_calls:
+        assert not any(builtin_call in call_name for call_name in call_names), f"Builtin call '{builtin_call}' should be excluded but found in {call_names}"
 
-def test_63_comprehensive_function_details(engine):
-    resp = engine.get_details("function", ["mint"], analysis_depth="comprehensive")
-    print("get_details(function mint, comprehensive):", json.dumps(resp, indent=2))
+
+def test_63_function_dependencies_and_data_flow(engine):
+    resp = engine.get_details("function", ["mint"])
+    print("get_details(function mint):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     el = resp["data"]["elements"]["mint"]
@@ -67,12 +72,9 @@ def test_63_comprehensive_function_details(engine):
     ci = el.get("comprehensive_info", {})
     assert "dependencies" in ci and "call_graph" in ci and "data_flow" in ci
 
-    # Validate dependencies - should include imports from ERC721WithImports.sol
+    # Validate dependencies - functions should have no dependencies (only contracts have dependencies)
     dependencies = ci.get("dependencies", [])
-    dep_names = [dep.get("name") for dep in dependencies]
-    expected_deps = ["ERC721", "Ownable", "ReentrancyGuard", "ILayerZeroReceiver", "SafeMath"]
-    for expected_dep in expected_deps:
-        assert any(expected_dep in dep_name for dep_name in dep_names), f"Expected dependency '{expected_dep}' not found"
+    assert dependencies == [], f"Functions should have no dependencies, but found: {dependencies}"
 
     # Validate call_graph
     call_graph = ci.get("call_graph", {})
@@ -105,9 +107,9 @@ def test_63_comprehensive_function_details(engine):
     assert data_flow.get("state_changes") is True
 
 
-def test_64_basic_contract_details(engine):
-    resp = engine.get_details("contract", ["MultiInheritanceToken"], analysis_depth="basic")
-    print("get_details(contract MultiInheritanceToken, basic):", json.dumps(resp, indent=2))
+def test_64_contract_basic_info(engine):
+    resp = engine.get_details("contract", ["MultiInheritanceToken"])
+    print("get_details(contract MultiInheritanceToken):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     el = resp["data"]["elements"]["MultiInheritanceToken"]
@@ -125,9 +127,9 @@ def test_64_basic_contract_details(engine):
     assert location.get("contract") == "MultiInheritanceToken"
 
 
-def test_65_detailed_contract_with_context(engine):
-    resp = engine.get_details("contract", ["ERC721WithImports"], analysis_depth="detailed", include_context=True)
-    print("get_details(contract ERC721WithImports, detailed, with context):", json.dumps(resp, indent=2))
+def test_65_contract_with_context(engine):
+    resp = engine.get_details("contract", ["ERC721WithImports"], include_context=True)
+    print("get_details(contract ERC721WithImports, with context):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
     if resp.get("success"):
         el = resp.get("data", {}).get("elements", {}).get("ERC721WithImports", {})
@@ -136,15 +138,15 @@ def test_65_detailed_contract_with_context(engine):
             assert "context" in el
 
 
-def test_66_comprehensive_contract_details(engine):
-    resp = engine.get_details("contract", ["ERC721WithImports"], analysis_depth="comprehensive")
-    print("get_details(contract ERC721WithImports, comprehensive):", json.dumps(resp, indent=2))
+def test_66_contract_full_analysis(engine):
+    resp = engine.get_details("contract", ["ERC721WithImports"])
+    print("get_details(contract ERC721WithImports):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
 
 
 def test_67_variable_details(engine):
-    resp = engine.get_details("variable", ["totalSupply"], analysis_depth="basic")
-    print("get_details(variable totalSupply, basic):", json.dumps(resp, indent=2))
+    resp = engine.get_details("variable", ["totalSupply"])
+    print("get_details(variable totalSupply):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     el = resp["data"]["elements"]["totalSupply"]
@@ -162,7 +164,7 @@ def test_67_variable_details(engine):
 
 
 def test_68_modifier_details(engine):
-    resp = engine.get_details("modifier", ["onlyOwner"], analysis_depth="detailed")
+    resp = engine.get_details("modifier", ["onlyOwner"])
     print("get_details(modifier onlyOwner, detailed):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
@@ -184,7 +186,7 @@ def test_68_modifier_details(engine):
 
 
 def test_69_event_details(engine):
-    resp = engine.get_details("event", ["TokenMinted"], analysis_depth="basic")
+    resp = engine.get_details("event", ["TokenMinted"])
     print("get_details(event TokenMinted, basic):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
@@ -202,7 +204,7 @@ def test_69_event_details(engine):
 
 
 def test_70_error_details(engine):
-    resp = engine.get_details("error", ["InsufficientBalance"], analysis_depth="basic")
+    resp = engine.get_details("error", ["InsufficientBalance"])
     print("get_details(error InsufficientBalance, basic):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
@@ -220,7 +222,7 @@ def test_70_error_details(engine):
 
 
 def test_71_struct_details(engine):
-    resp = engine.get_details("struct", ["UserData"], analysis_depth="basic")
+    resp = engine.get_details("struct", ["UserData"])
     assert resp.get("success") is True
 
     el = resp["data"]["elements"]["UserData"]
@@ -237,12 +239,12 @@ def test_71_struct_details(engine):
 
 
 def test_72_enum_details(engine):
-    resp = engine.get_details("enum", ["TokenState"], analysis_depth="basic")
+    resp = engine.get_details("enum", ["TokenState"])
     assert resp.get("success") in (True, False)
 
 
 def test_73_function_details_by_signature(engine):
-    resp = engine.get_details("function", ["mint(address)"], analysis_depth="basic")
+    resp = engine.get_details("function", ["mint(address)"])
     print("get_details(function mint(address), basic):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
@@ -261,25 +263,25 @@ def test_73_function_details_by_signature(engine):
 
 
 def test_74_function_details_by_contract_element(engine):
-    resp = engine.get_details("function", ["MultiInheritanceToken.mint"], analysis_depth="basic")
+    resp = engine.get_details("function", ["MultiInheritanceToken.mint"])
     print("get_details(function MultiInheritanceToken.mint, basic):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
 
 
 def test_75_contract_details_by_file_contract(engine):
     key = "tests/fixtures/composition_and_imports/MultipleInheritance.sol:MultipleInheritance"
-    resp = engine.get_details("contract", [key], analysis_depth="basic")
+    resp = engine.get_details("contract", [key])
     print("get_details(contract file:contract MultipleInheritance):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
 
 
 def test_76_multiple_function_identifiers(engine):
-    resp = engine.get_details("function", ["approve", "balanceOf", "mint"], analysis_depth="detailed")
+    resp = engine.get_details("function", ["approve", "balanceOf", "mint"])
     assert resp.get("success") in (True, False)
 
 
 def test_77_include_context_false(engine):
-    resp = engine.get_details("function", ["mint"], analysis_depth="detailed", include_context=False)
+    resp = engine.get_details("function", ["mint"], include_context=False)
     print("get_details(function mint, detailed, no context):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
     if resp.get("success"):
@@ -289,7 +291,7 @@ def test_77_include_context_false(engine):
 
 
 def test_78_option_include_source_false(engine):
-    resp = engine.get_details("function", ["mint"], analysis_depth="detailed", options={"include_source": False})
+    resp = engine.get_details("function", ["mint"], options={"include_source": False})
     print("get_details(function mint, detailed, include_source=False):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
     if resp.get("success"):
@@ -299,7 +301,7 @@ def test_78_option_include_source_false(engine):
 
 
 def test_79_option_include_signatures_true(engine):
-    resp = engine.get_details("function", ["mint"], analysis_depth="basic", options={"include_signatures": True})
+    resp = engine.get_details("function", ["mint"], options={"include_signatures": True})
     print("get_details(function mint, basic, include_signatures=True):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
     if resp.get("success"):
@@ -309,21 +311,21 @@ def test_79_option_include_signatures_true(engine):
 
 
 def test_80_option_show_call_chains(engine):
-    resp = engine.get_details("function", ["mint"], analysis_depth="comprehensive", options={"show_call_chains": True})
+    resp = engine.get_details("function", ["mint"], options={"show_call_chains": True})
     print("get_details(function mint, comprehensive, show_call_chains=True):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
 
 
 def test_81_mixed_element_types_batches(engine):
-    r1 = engine.get_details("contract", ["MultiInheritanceToken", "ERC721WithImports"], analysis_depth="basic")
-    r2 = engine.get_details("variable", ["owner", "balances"], analysis_depth="basic")
+    r1 = engine.get_details("contract", ["MultiInheritanceToken", "ERC721WithImports"])
+    r2 = engine.get_details("variable", ["owner", "balances"])
     print("get_details(mixed batches):", r1, r2)
     assert r1.get("success") in (True, False)
     assert r2.get("success") in (True, False)
 
 
 def test_82_not_found_identifiers(engine):
-    resp = engine.get_details("function", ["nonexistentFunction"], analysis_depth="basic")
+    resp = engine.get_details("function", ["nonexistentFunction"])
     assert resp.get("success") is True  # Engine should succeed but element not found
 
     el = resp["data"]["elements"]["nonexistentFunction"]
@@ -333,14 +335,14 @@ def test_82_not_found_identifiers(engine):
 
 
 def test_83_depth_comparison(engine):
-    r_basic = engine.get_details("function", ["transfer"], analysis_depth="basic")
-    r_comp = engine.get_details("function", ["transfer"], analysis_depth="comprehensive")
+    r_basic = engine.get_details("function", ["transfer"])
+    r_comp = engine.get_details("function", ["transfer"])
     assert r_basic.get("success") in (True, False)
     assert r_comp.get("success") in (True, False)
 
 
 def test_84_sibling_context_present(engine):
-    resp = engine.get_details("function", ["mint"], analysis_depth="basic", include_context=True)
+    resp = engine.get_details("function", ["mint"], include_context=True)
     print("get_details(function mint, basic, include_context=True):", json.dumps(resp, indent=2))
     assert resp.get("success") in (True, False)
     if resp.get("success"):
@@ -350,22 +352,22 @@ def test_84_sibling_context_present(engine):
 
 
 def test_85_analysis_summary_fields(engine):
-    resp = engine.get_details("function", ["mint", "internalOnlyFunction"], analysis_depth="detailed")
+    resp = engine.get_details("function", ["mint", "internalOnlyFunction"])
     print("get_details(function mint,internalOnlyFunction detailed):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate analysis_summary contains expected values
     summary = resp["data"]["analysis_summary"]
-    for k in ("elements_found", "elements_requested", "analysis_depth", "success_rate", "features_analyzed"):
+    for k in ("elements_found", "elements_requested", "success_rate", "features_analyzed"):
         assert k in summary
 
     # Validate specific values
     assert summary["elements_requested"] == 2
     assert summary["elements_found"] == 2  # Both functions should be found
-    assert summary["analysis_depth"] == "detailed"
     assert summary["success_rate"] == 1.0  # 100% success rate
     assert "basic_info" in summary["features_analyzed"]
     assert "detailed_info" in summary["features_analyzed"]
+    assert "comprehensive_info" in summary["features_analyzed"]
 
     # Validate both elements were found
     elements = resp["data"]["elements"]

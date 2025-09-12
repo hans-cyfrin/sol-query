@@ -193,7 +193,6 @@ class SolidityQueryEngineV2:
     def get_details(self,
                     element_type: str,
                     identifiers: List[str],
-                    analysis_depth: str = "basic",
                     include_context: bool = True,
                     options: Dict[str, Any] = {}) -> Dict[str, Any]:
         """
@@ -202,23 +201,21 @@ class SolidityQueryEngineV2:
         Args:
             element_type: Type of element (function, contract, variable, etc.)
             identifiers: Element identifiers to analyze
-            analysis_depth: Analysis depth level (basic, detailed, comprehensive)
             include_context: Whether to include surrounding context
             options: Additional analysis options
             
         Returns:
-            Detailed analysis results for specified elements
+            Comprehensive analysis results for specified elements
         """
         start_time = time.time()
 
         try:
             # Validate parameters
-            validation_errors = self._validate_get_details_params(element_type, identifiers, analysis_depth, options)
+            validation_errors = self._validate_get_details_params(element_type, identifiers, options)
             if validation_errors:
                 return self._create_error_response("get_details", {
                     "element_type": element_type,
                     "identifiers": identifiers,
-                    "analysis_depth": analysis_depth,
                     "include_context": include_context,
                     "options": options
                 }, validation_errors)
@@ -226,13 +223,13 @@ class SolidityQueryEngineV2:
             # Find elements by identifiers
             elements = self._find_elements_by_identifiers(element_type, identifiers)
 
-            # Perform analysis based on depth
+            # Perform comprehensive analysis
             analysis_results = {}
             for identifier in identifiers:
                 element = elements.get(identifier)
                 if element:
                     analysis_results[identifier] = self._analyze_element(
-                        element, analysis_depth, include_context, options
+                        element, include_context, options
                     )
                 else:
                     analysis_results[identifier] = {
@@ -249,7 +246,6 @@ class SolidityQueryEngineV2:
                     "parameters": {
                         "element_type": element_type,
                         "identifiers": identifiers,
-                        "analysis_depth": analysis_depth,
                         "include_context": include_context,
                         "options": options
                     },
@@ -259,11 +255,10 @@ class SolidityQueryEngineV2:
                 },
                 "data": {
                     "elements": analysis_results,
-                    "analysis_summary": self._create_analysis_summary(analysis_results, analysis_depth)
+                    "analysis_summary": self._create_analysis_summary(analysis_results)
                 },
                 "metadata": {
                     "analysis_scope": {"element_type": element_type, "identifiers": identifiers},
-                    "analysis_depth": analysis_depth,
                     "performance": {
                         "elements_analyzed": len(identifiers),
                         "files_processed": len(self.source_manager.files),
@@ -278,7 +273,6 @@ class SolidityQueryEngineV2:
             return self._handle_exception("get_details", {
                 "element_type": element_type,
                 "identifiers": identifiers,
-                "analysis_depth": analysis_depth,
                 "include_context": include_context,
                 "options": options
             }, e, "during element detail analysis")
@@ -416,7 +410,7 @@ class SolidityQueryEngineV2:
         return errors
 
     def _validate_get_details_params(self, element_type: str, identifiers: List[str],
-                                   analysis_depth: str, options: Dict[str, Any]) -> List[Dict[str, Any]]:
+                                   options: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Validate get_details parameters."""
         errors = []
 
@@ -427,15 +421,6 @@ class SolidityQueryEngineV2:
                 "parameter": "element_type",
                 "error": f"Invalid element_type '{element_type}'",
                 "valid_values": valid_element_types
-            })
-
-        # Validate analysis_depth
-        valid_depths = ["basic", "detailed", "comprehensive"]
-        if analysis_depth not in valid_depths:
-            errors.append({
-                "parameter": "analysis_depth",
-                "error": f"Invalid analysis_depth '{analysis_depth}'",
-                "valid_values": valid_depths
             })
 
         # Validate identifiers
@@ -840,44 +825,7 @@ class SolidityQueryEngineV2:
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return False
 
-        def check_for_external_calls(ts_node) -> bool:
-            """Recursively traverse tree-sitter nodes to find external calls."""
-            if not ts_node:
-                return False
-
-            node_type = ts_node.type
-
-            # Check for call expressions
-            if node_type == "call_expression":
-                call_info = self._analyze_call_expression(ts_node)
-                if call_info and call_info.get('type') in ['external', 'low_level']:
-                    return True
-
-            # Check for member access that might be external calls
-            elif node_type == "member_access":
-                member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
-                if member_text:
-                    # Check for low-level calls first
-                    if any(method in member_text for method in ['call', 'delegatecall', 'staticcall', 'send', 'transfer']):
-                        return True
-                    # Check for external contract calls (exclude builtins)
-                    builtin_members = {
-                        'msg.sender', 'msg.value', 'msg.data', 'msg.sig',
-                        'block.timestamp', 'block.number', 'block.coinbase',
-                        'tx.origin', 'tx.gasprice'
-                    }
-                    if '.' in member_text and member_text not in builtin_members:
-                        # This could be an external contract call
-                        return True
-
-            # Recursively check children
-            for child in ts_node.children:
-                if check_for_external_calls(child):
-                    return True
-
-            return False
-
-        return check_for_external_calls(node.raw_node)
+        return self._check_for_external_calls_recursive(node.raw_node)
 
     def _filter_by_state_changes(self, nodes: List[ASTNode], changes_state: bool) -> List[ASTNode]:
         """Filter functions that change state."""
@@ -895,62 +843,7 @@ class SolidityQueryEngineV2:
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return False
 
-        def check_for_state_changes(ts_node) -> bool:
-            """Recursively traverse tree-sitter nodes to find state changes."""
-            if not ts_node:
-                return False
-
-            node_type = ts_node.type
-
-            # Check for assignment operations
-            if node_type in ["assignment_operator", "assignment_expression"]:
-                return True
-
-            # Check for compound assignments (+=, -=, *=, /=)
-            elif node_type in ["augmented_assignment_operator", "compound_assignment"]:
-                return True
-
-            # Check for update expressions (++, --)
-            elif node_type in ["update_expression", "unary_expression"]:
-                return self._is_update_expression(ts_node)
-
-            # Check for function calls that modify state
-            elif node_type == "call_expression":
-                call_info = self._analyze_call_expression(ts_node)
-                if call_info:
-                    call_name = call_info.get('name', '').lower()
-                    # State-modifying function patterns
-                    state_modifying_calls = {'push', 'pop', 'delete', 'transfer', 'send'}
-                    if any(method in call_name for method in state_modifying_calls):
-                        return True
-
-            # Check for member access assignments (e.g., balances[user] = amount)
-            elif node_type == "index_access":
-                # Check if this index access is on the left side of an assignment
-                parent = ts_node.parent
-                if parent and parent.type == "assignment_operator":
-                    # Check if this is the left operand
-                    if parent.children and parent.children[0] == ts_node:
-                        return True
-
-            # Check for delete statements
-            elif node_type == "delete_statement":
-                return True
-
-            # Check for storage variable declarations with assignments
-            elif node_type == "variable_declaration":
-                var_text = ts_node.text.decode('utf-8') if ts_node.text else ''
-                if 'storage' in var_text and '=' in var_text:
-                    return True
-
-            # Recursively check children
-            for child in ts_node.children:
-                if check_for_state_changes(child):
-                    return True
-
-            return False
-
-        return check_for_state_changes(node.raw_node)
+        return self._check_for_state_changes_recursive(node.raw_node)
 
     def _matches_pattern(self, text: str, pattern: str) -> bool:
         """Check if text matches pattern (exact or regex)."""
@@ -1152,19 +1045,14 @@ class SolidityQueryEngineV2:
         return False
 
 
-    def _analyze_element(self, element: ASTNode, analysis_depth: str,
-                        include_context: bool, options: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze an element based on analysis depth."""
+    def _analyze_element(self, element: ASTNode, include_context: bool, options: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze an element comprehensively."""
         result = {
             "found": True,
-            "basic_info": self._get_basic_element_info(element)
+            "basic_info": self._get_basic_element_info(element),
+            "detailed_info": self._get_detailed_element_info(element, options),
+            "comprehensive_info": self._get_comprehensive_element_info(element)
         }
-
-        if analysis_depth in ["detailed", "comprehensive"]:
-            result["detailed_info"] = self._get_detailed_element_info(element, options)
-
-        if analysis_depth == "comprehensive":
-            result["comprehensive_info"] = self._get_comprehensive_element_info(element)
 
         if include_context:
             result["context"] = self._get_element_context(element)
@@ -1210,7 +1098,7 @@ class SolidityQueryEngineV2:
         info = {}
 
         if options.get("include_source", True):
-            info["source_code"] = getattr(element, 'source_code', None)
+            info["source_code"] = element.get_source_code() if hasattr(element, 'get_source_code') else None
 
         if isinstance(element, FunctionDeclaration):
             info["visibility"] = str(element.visibility) if hasattr(element, 'visibility') else None
@@ -1226,8 +1114,7 @@ class SolidityQueryEngineV2:
         return {
             "dependencies": self._get_element_dependencies(element),
             "call_graph": self._get_element_call_graph(element),
-            "data_flow": self._get_element_data_flow(element),
-            "security_analysis": self._get_element_security_analysis(element)
+            "data_flow": self._get_element_data_flow(element)
         }
 
     def _find_target_element(self, target: str, target_type: str) -> Optional[ASTNode]:
@@ -1790,58 +1677,7 @@ class SolidityQueryEngineV2:
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return False
 
-        def check_for_asset_transfers(ts_node) -> bool:
-            """Recursively traverse tree-sitter nodes to find asset transfers."""
-            if not ts_node:
-                return False
-
-            node_type = ts_node.type
-
-            # Check for function calls that might be asset transfers
-            if node_type == "call_expression":
-                call_info = self._analyze_call_expression(ts_node)
-                if call_info:
-                    call_name = call_info.get('name', '').lower()
-                    # Asset transfer function patterns
-                    transfer_functions = {
-                        'transfer', 'send', 'safetransfer', 'transferfrom', '_transfer'
-                    }
-                    if any(func in call_name for func in transfer_functions):
-                        return True
-
-            # Check for member access that indicates asset transfers
-            elif node_type == "member_access":
-                member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
-                if member_text:
-                    # Check for Ether transfer methods
-                    ether_transfer_methods = {'transfer', 'send'}
-                    if any(f'.{method}' in member_text for method in ether_transfer_methods):
-                        return True
-
-            # Check for call expressions with value field (e.g., call{value: amount})
-            elif node_type == "call_options":
-                # This indicates a call with options like {value: ...}
-                options_text = ts_node.text.decode('utf-8') if ts_node.text else ''
-                if 'value' in options_text.lower():
-                    return True
-
-            # Check for payable cast expressions
-            elif node_type == "call_expression":
-                # Look for payable(...) patterns
-                for child in ts_node.children:
-                    if child.type == "identifier":
-                        func_name = child.text.decode('utf-8') if child.text else ''
-                        if func_name == 'payable':
-                            return True
-
-            # Recursively check children
-            for child in ts_node.children:
-                if check_for_asset_transfers(child):
-                    return True
-
-            return False
-
-        return check_for_asset_transfers(node.raw_node)
+        return self._check_for_asset_transfers_recursive(node.raw_node)
 
     def _filter_by_payable(self, nodes: List[ASTNode], is_payable: bool) -> List[ASTNode]:
         """Filter for payable functions."""
@@ -2004,36 +1840,7 @@ class SolidityQueryEngineV2:
         # Track found calls to avoid duplicates
         found_calls = set()
 
-        def traverse_node(ts_node):
-            """Recursively traverse tree-sitter nodes to find function calls."""
-            if not ts_node:
-                return
-
-            node_type = ts_node.type
-
-            # Identify function call patterns
-            if node_type == "call_expression":
-                call_info = self._analyze_call_expression(ts_node)
-                if call_info:
-                    call_key = f"{call_info['name']}_{call_info['position']}"
-                    if call_key not in found_calls:
-                        calls.append(call_info)
-                        found_calls.add(call_key)
-
-            elif node_type in ["member_access", "member_expression", "member_access_expression"]:
-                # Check if this member access is part of a low-level call
-                member_call = self._analyze_member_call(ts_node)
-                if member_call:
-                    call_key = f"{member_call['name']}_{member_call['position']}"
-                    if call_key not in found_calls:
-                        calls.append(member_call)
-                        found_calls.add(call_key)
-
-            # Recursively traverse children
-            for child in ts_node.children:
-                traverse_node(child)
-
-        traverse_node(node.raw_node)
+        self._traverse_node_for_calls(node.raw_node, calls, found_calls)
         return calls
 
     def _get_node_statements(self, node: ASTNode) -> List[Dict[str, Any]]:
@@ -2046,31 +1853,7 @@ class SolidityQueryEngineV2:
         # Track found statements to avoid duplicates
         found_statements = set()
 
-        def traverse_node(ts_node):
-            """Recursively traverse tree-sitter nodes to find statements."""
-            if not ts_node:
-                return
-
-            node_type = ts_node.type
-
-            # Identify statement patterns
-            if node_type in [
-                "expression_statement", "return_statement", "if_statement",
-                "for_statement", "while_statement", "emit_statement",
-                "assembly_statement", "variable_declaration_statement"
-            ]:
-                stmt_info = self._analyze_statement(ts_node, node)
-                if stmt_info:
-                    stmt_key = f"{stmt_info['type']}_{stmt_info['position']}"
-                    if stmt_key not in found_statements:
-                        statements.append(stmt_info)
-                        found_statements.add(stmt_key)
-
-            # Continue traversing child nodes
-            for child in ts_node.children:
-                traverse_node(child)
-
-        traverse_node(node.raw_node)
+        self._traverse_node_for_statements(node.raw_node, statements, found_statements, node)
         return statements
 
     def _analyze_statement(self, ts_node, parent_node: ASTNode) -> Optional[Dict[str, Any]]:
@@ -2248,9 +2031,9 @@ class SolidityQueryEngineV2:
 
         return None
 
-    def _classify_call_type(self, call_name: str, _function_node) -> str:
-        """Classify the type of function call."""
-        # Built-in functions
+    def _classify_call_type(self, call_name: str, function_node) -> str:
+        """Classify the type of function call using proper AST-based analysis."""
+        # 1. Built-in functions (language-level, safe to identify)
         builtin_functions = {
             'require', 'assert', 'revert', 'keccak256', 'sha256', 'ripemd160',
             'ecrecover', 'addmod', 'mulmod', 'selfdestruct'
@@ -2259,25 +2042,124 @@ class SolidityQueryEngineV2:
         if call_name in builtin_functions:
             return 'builtin'
 
-        # Member access calls (contract.method or address.method)
+        # 2. Low-level calls (language-level, safe to identify)
         if '.' in call_name:
             parts = call_name.split('.')
             method = parts[-1]
-
-            # True low-level calls on addresses
             if method in {'call', 'delegatecall', 'staticcall', 'send'}:
                 return 'low_level'
-            else:
-                # All other member access calls are considered external
-                # This includes transfer(), approve(), balanceOf(), etc.
-                return 'external'
 
-        # Library calls (if the function name suggests it)
-        if any(lib in call_name.lower() for lib in ['safemath', 'strings', 'address']):
-            return 'library'
+        # 3. Try to determine if it's external using AST-based scope analysis
+        classification = self._classify_using_scope_analysis(call_name, function_node)
+        if classification:
+            return classification
 
-        # Default to internal for simple identifiers
-        return 'internal'
+        # 4. For cases we can't reliably determine, return 'call'
+        return 'call'
+
+    def _classify_using_scope_analysis(self, call_name: str, function_node) -> Optional[str]:
+        """Use AST-based scope analysis to classify calls."""
+        try:
+            # Step 1: Check if it's an internal function in the same contract
+            if self._is_internal_function_in_contract(call_name):
+                return 'internal'
+
+            # Step 2: Check if it's a member access call (likely external)
+            if '.' in call_name:
+                return self._classify_member_access_call_ast(call_name)
+
+            # Step 3: Check if it's an inherited function
+            if self._is_inherited_function(call_name):
+                return 'internal'  # Inherited functions are accessible as internal
+
+            # Step 4: If not found in contract scope, likely external
+            # This is a reasonable heuristic for simple function names
+            return 'external'
+
+        except Exception:
+            # If any error occurs in analysis, return None to fall back to 'call'
+            return None
+
+    def _is_internal_function_in_contract(self, call_name: str) -> bool:
+        """Check if function exists in the current contract scope."""
+        # Functions starting with underscore are conventionally internal
+        if call_name.startswith('_'):
+            return True
+
+        # Get the current contract from source manager
+        current_contract = self._get_current_contract_context()
+        if not current_contract:
+            return False
+
+        # Check if function exists in current contract
+        for func in current_contract.functions:
+            if func.name == call_name:
+                # Check if it's internal or private (accessible within contract)
+                from sol_query.core.ast_nodes import Visibility
+                return func.visibility in [Visibility.INTERNAL, Visibility.PRIVATE]
+
+        return False
+
+    def _classify_member_access_call_ast(self, call_name: str) -> str:
+        """Classify member access calls using AST context."""
+        parts = call_name.split('.')
+
+        # Check if it's accessing a known state variable type
+        # TODO: This would require type resolution of the base object
+
+        # For now, member access calls are likely external contract calls
+        # unless they're clearly library calls or built-in calls
+        return 'external'
+
+    def _is_inherited_function(self, call_name: str) -> bool:
+        """Check if function comes from inheritance chain."""
+        current_contract = self._get_current_contract_context()
+        if not current_contract:
+            return False
+
+        # Check inheritance chain
+        return self._check_function_in_inheritance_chain(call_name, current_contract)
+
+    def _get_current_contract_context(self) -> Optional[ContractDeclaration]:
+        """Get the contract context we're currently analyzing."""
+        # Try to get context from current analysis state
+        # This is a simplified approach - in a full implementation we'd track context properly
+
+        # For now, try to infer from the most recently analyzed contract
+        # that has functions (indicating it's likely the target of our analysis)
+        for source_file in self.source_manager.get_all_files():
+            for contract in source_file.contracts:
+                # Look for contracts that have functions and are likely our analysis target
+                if contract.functions:
+                    return contract
+
+        return None
+
+    def _check_function_in_inheritance_chain(self, call_name: str, contract: ContractDeclaration) -> bool:
+        """Check if function exists in the inheritance chain."""
+        from sol_query.core.ast_nodes import Visibility
+
+        # Check inherited contracts
+        for base_name in contract.inheritance:
+            base_contract = self._find_contract_by_name(base_name)
+            if base_contract:
+                # Check functions in base contract
+                for func in base_contract.functions:
+                    if func.name == call_name:
+                        # Inherited functions must be public or internal to be accessible
+                        if func.visibility in [Visibility.PUBLIC, Visibility.INTERNAL]:
+                            return True
+
+                # Recursively check base contract's inheritance
+                if self._check_function_in_inheritance_chain(call_name, base_contract):
+                    return True
+
+        return False
+
+    def _find_contract_by_name(self, name: str) -> Optional[ContractDeclaration]:
+        """Find a contract by name across all source files."""
+        result = self.source_manager.find_contract(name)
+        return result[0] if result else None
 
     def _count_call_arguments(self, call_node) -> int:
         """Count the number of arguments in a function call."""
@@ -2323,65 +2205,15 @@ class SolidityQueryEngineV2:
         # Track found variables to avoid duplicates
         found_vars = set()
 
-        def traverse_node(ts_node, parent_context=None):
-            """Recursively traverse tree-sitter nodes to find variable access."""
-            if not ts_node:
-                return
-
-            node_type = ts_node.type
-
-            # Skip certain contexts where identifiers are not variables
-            skip_contexts = {
-                'function_definition', 'constructor_definition', 'modifier_definition',
-                'function_call', 'modifier_invocation', 'parameter_list', 'type_name',
-                'function_type', 'event_definition', 'struct_definition', 'enum_definition'
-            }
-
-            if parent_context in skip_contexts:
-                # Still traverse children but don't capture variables in these contexts
-                for child in ts_node.children:
-                    traverse_node(child, node_type)
-                return
-
-            # Handle member access first (e.g., msg.sender, block.timestamp)
-            if node_type in ["member_access", "member_expression"]:
-                member_info = self._analyze_member_access(ts_node)
-                if member_info and member_info['name'] not in found_vars:
-                    variables.append(member_info)
-                    found_vars.add(member_info['name'])
-                # Don't traverse children of member_access to avoid processing individual parts
-                return
-
-            # Handle array/mapping access like balances[user]
-            elif node_type == "index_access":
-                index_info = self._analyze_index_access(ts_node, parent_context)
-                if index_info and index_info['name'] not in found_vars:
-                    variables.append(index_info)
-                    found_vars.add(index_info['name'])
-                # Still traverse children to find variables in the index expression
-
-            # Handle standalone identifiers (but only in appropriate contexts)
-            elif node_type == "identifier":
-                # Skip if this identifier is part of a member access expression
-                if parent_context in {'member_access', 'call_expression', 'emit_statement'}:
-                    pass  # Skip identifiers in these contexts
-                else:
-                    var_name = ts_node.text.decode('utf-8') if ts_node.text else None
-                    if var_name and var_name not in found_vars:
-                        var_info = self._analyze_identifier_context(ts_node, var_name, parent_context)
-                        if var_info:
-                            variables.append(var_info)
-                            found_vars.add(var_name)
-
-            # Recursively traverse children
-            for child in ts_node.children:
-                traverse_node(child, node_type)
-
-        traverse_node(node.raw_node)
+        self._traverse_node_for_variables(node.raw_node, variables, found_vars, node)
         return variables
 
     def _analyze_identifier_context(self, ts_node, var_name: str, parent_context: Optional[str]) -> Optional[Dict[str, Any]]:
         """Analyze an identifier node to determine if it's a relevant variable."""
+        # Skip partial/malformed variable names
+        if not var_name.strip() or var_name.endswith('(') or '(' in var_name:
+            return None
+
         # Skip common keywords, types, and built-in globals
         excluded_names = {
             # Keywords and control flow
@@ -2403,7 +2235,7 @@ class SolidityQueryEngineV2:
             'public', 'private', 'internal', 'external',
 
             # Literals and built-ins
-            'true', 'false', 'null', 'this', 'super',
+            'true', 'false', 'null', 'this', 'super', 'payable',
 
             # Built-in globals (individual parts)
             'msg', 'block', 'tx', 'gasleft', 'now',
@@ -2424,7 +2256,8 @@ class SolidityQueryEngineV2:
             'Transfer', 'Approval', 'Mint', 'Burn', 'TokenMinted', 'OwnershipTransferred'
         }
 
-        if var_name.lower() in excluded_names:
+        # Check both original case and lowercase for exclusion
+        if var_name in excluded_names or var_name.lower() in excluded_names:
             return None
 
         # Determine variable type and access pattern
@@ -2619,48 +2452,7 @@ class SolidityQueryEngineV2:
                 return any(op in source_code for op in operators)
             return False
 
-        def check_operators(ts_node) -> bool:
-            if not ts_node:
-                return False
-
-            # Map operator strings to AST node types
-            operator_node_types = {
-                '+': ['binary_expression'],
-                '-': ['binary_expression'],
-                '*': ['binary_expression'],
-                '/': ['binary_expression'],
-                '%': ['binary_expression'],
-                '++': ['update_expression', 'increment_expression'],
-                '--': ['update_expression', 'decrement_expression'],
-                '+=': ['augmented_assignment_operator'],
-                '-=': ['augmented_assignment_operator'],
-                '*=': ['augmented_assignment_operator'],
-                '/=': ['augmented_assignment_operator'],
-                '==': ['binary_expression'],
-                '!=': ['binary_expression'],
-                '<': ['binary_expression'],
-                '>': ['binary_expression'],
-                '<=': ['binary_expression'],
-                '>=': ['binary_expression'],
-                '&&': ['binary_expression'],
-                '||': ['binary_expression'],
-                '!': ['unary_expression']
-            }
-
-            # Check if this node type matches any requested operators
-            for op in operators:
-                if op in operator_node_types:
-                    if ts_node.type in operator_node_types[op]:
-                        return True
-
-            # Recursively check children
-            for child in ts_node.children:
-                if check_operators(child):
-                    return True
-
-            return False
-
-        return check_operators(node.raw_node)
+        return self._check_operators_recursive(node.raw_node, operators)
 
     def _determine_access_type(self, ts_node) -> str:
         """Determine if this is a read or write access."""
@@ -2690,57 +2482,7 @@ class SolidityQueryEngineV2:
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return events
 
-        def find_emit_statements(ts_node):
-            """Recursively find emit statements in the AST."""
-            if not ts_node:
-                return
-
-            node_type = ts_node.type
-
-            # Look for emit statements
-            if node_type == "emit_statement":
-                # Find the event name being emitted
-                for child in ts_node.children:
-                    if child.type == "expression":
-                        # Find the event identifier within the expression
-                        for expr_child in child.children:
-                            if expr_child.type == "identifier":
-                                event_name = expr_child.text.decode('utf-8') if expr_child.text else None
-                                if event_name:
-                                    events.append({
-                                        'name': event_name,
-                                        'position': expr_child.start_byte
-                                    })
-                                break
-                        break
-
-            # Also look for emit keyword followed by call expressions
-            elif node_type == "identifier" and ts_node.text and ts_node.text.decode('utf-8') == "emit":
-                # Check if the next sibling is a call expression
-                parent = ts_node.parent
-                if parent:
-                    found_emit = False
-                    for child in parent.children:
-                        if child == ts_node:
-                            found_emit = True
-                        elif found_emit and child.type == "call_expression":
-                            # Extract event name from the call
-                            for call_child in child.children:
-                                if call_child.type == "identifier":
-                                    event_name = call_child.text.decode('utf-8') if call_child.text else None
-                                    if event_name:
-                                        events.append({
-                                            'name': event_name,
-                                            'position': call_child.start_byte
-                                        })
-                                    break
-                            break
-
-            # Recursively check children
-            for child in ts_node.children:
-                find_emit_statements(child)
-
-        find_emit_statements(node.raw_node)
+        self._find_emit_statements_recursive(node.raw_node, events)
         return events
 
     def _get_node_natspec(self, node: ASTNode) -> Dict[str, Any]:
@@ -2760,46 +2502,6 @@ class SolidityQueryEngineV2:
         if not hasattr(node, 'raw_node') or not node.raw_node:
             return dependencies
 
-        def find_dependencies(ts_node):
-            """Recursively find dependencies in the AST."""
-            if not ts_node:
-                return
-
-            node_type = ts_node.type
-
-            # Look for import statements
-            if node_type == "import_directive":
-                for child in ts_node.children:
-                    if child.type == "string":
-                        import_path = child.text.decode('utf-8').strip('"\'') if child.text else None
-                        if import_path:
-                            dependencies.append(import_path)
-
-            # Look for using directives
-            elif node_type == "using_for_directive":
-                for child in ts_node.children:
-                    if child.type == "identifier":
-                        library_name = child.text.decode('utf-8') if child.text else None
-                        if library_name:
-                            dependencies.append(library_name)
-                            break
-
-            # Look for inheritance
-            elif node_type == "inheritance_specifier":
-                for child in ts_node.children:
-                    if child.type == "user_defined_type":
-                        # Get the inherited contract name
-                        for type_child in child.children:
-                            if type_child.type == "identifier":
-                                base_contract = type_child.text.decode('utf-8') if type_child.text else None
-                                if base_contract:
-                                    dependencies.append(base_contract)
-                                    break
-
-            # Recursively check children
-            for child in ts_node.children:
-                find_dependencies(child)
-
         # For contracts, we need to look at the source unit (file level) to find imports
         source_node = node.raw_node
 
@@ -2808,10 +2510,10 @@ class SolidityQueryEngineV2:
             source_node = source_node.parent
 
         # First, find imports at source level
-        find_dependencies(source_node)
+        self._find_dependencies_recursive(source_node, dependencies)
 
         # Then, find contract-specific dependencies (inheritance, using directives)
-        find_dependencies(node.raw_node)
+        self._find_dependencies_recursive(node.raw_node, dependencies)
 
         return list(set(dependencies))  # Remove duplicates
 
@@ -2849,21 +2551,16 @@ class SolidityQueryEngineV2:
                 distribution[visibility] = distribution.get(visibility, 0) + 1
         return distribution
 
-    def _create_analysis_summary(self, analysis_results: Dict[str, Any], depth: str) -> Dict[str, Any]:
+    def _create_analysis_summary(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """Create summary of analysis results."""
         found_count = len([r for r in analysis_results.values() if r.get("found", True)])
 
-        # Count analysis features by depth
-        features_analyzed = ["basic_info"]
-        if depth in ["detailed", "comprehensive"]:
-            features_analyzed.append("detailed_info")
-        if depth == "comprehensive":
-            features_analyzed.extend(["comprehensive_info", "dependencies", "call_graphs"])
+        # Features always analyzed in comprehensive mode
+        features_analyzed = ["basic_info", "detailed_info", "comprehensive_info", "dependencies", "call_graphs", "data_flow"]
 
         return {
             "elements_found": found_count,
             "elements_requested": len(analysis_results),
-            "analysis_depth": depth,
             "success_rate": found_count / len(analysis_results) if analysis_results else 0,
             "features_analyzed": features_analyzed,
             "total_analysis_points": len(features_analyzed) * found_count
@@ -2879,10 +2576,6 @@ class SolidityQueryEngineV2:
 
     def _get_element_context(self, element: ASTNode) -> Dict[str, Any]:
         """Get context information for an element."""
-        # Get source code with preview for long functions
-        source_code = element.get_source_code() if hasattr(element, 'get_source_code') else ''
-        surrounding_code = self._create_code_preview(source_code)
-
         # Get file context from source_location
         file_context = {
             "file_path": None,
@@ -2896,9 +2589,14 @@ class SolidityQueryEngineV2:
             file_context["contract"] = self._get_contract_name_from_element(element)
 
         context = {
-            "surrounding_code": surrounding_code,
             "file_context": file_context
         }
+
+        # For non-functions, include surrounding_code since they don't have source_code in detailed_info
+        from sol_query.core.ast_nodes import FunctionDeclaration
+        if not isinstance(element, FunctionDeclaration):
+            source_code = element.get_source_code() if hasattr(element, 'get_source_code') else ''
+            context["surrounding_code"] = self._create_code_preview(source_code)
 
         # Add parent/child relationships
         if hasattr(element, 'parent'):
@@ -2912,8 +2610,8 @@ class SolidityQueryEngineV2:
 
         return context
 
-    def _get_sibling_elements(self, element: ASTNode) -> List[Dict[str, Any]]:
-        """Get sibling elements for context."""
+    def _get_sibling_elements(self, element: ASTNode) -> List[str]:
+        """Get sibling elements for context as simple contract::function strings."""
         siblings = []
 
         # Get the contract name for this element
@@ -2932,11 +2630,9 @@ class SolidityQueryEngineV2:
                 # Check if this node is in the same contract
                 node_contract = self._get_contract_name_from_element(node)
                 if node_contract == element_contract:
-                    siblings.append({
-                        "name": getattr(node, 'name', None),
-                        "type": self._get_user_friendly_type(type(node).__name__),
-                        "location": self._get_node_location(node)
-                    })
+                    node_name = getattr(node, 'name', None)
+                    if node_name:
+                        siblings.append(f"{node_contract}::{node_name}")
 
                     # Limit to 5 siblings to avoid overwhelming output
                     if len(siblings) >= 5:
@@ -2946,7 +2642,7 @@ class SolidityQueryEngineV2:
 
     def _create_code_preview(self, source_code: str, max_length: int = 1000) -> str:
         """Create a code preview with head and tail for long functions."""
-        if not source_code:
+        if not source_code or not isinstance(source_code, str):
             return ""
 
         if len(source_code) <= max_length:
@@ -2986,37 +2682,28 @@ class SolidityQueryEngineV2:
         return None
 
     def _get_element_dependencies(self, element: ASTNode) -> List[Dict[str, Any]]:
-        """Get dependencies of an element."""
+        """Get dependencies of an element - only for contracts."""
         dependencies = []
 
-        # Get direct dependencies from source code
+        # Only return dependencies for contracts
+        if not isinstance(element, ContractDeclaration):
+            return dependencies
+
+        # Get imports/using statements for contracts
         source_deps = self._get_node_dependencies(element)
         for dep in source_deps:
             dependencies.append({
                 "name": dep,
-                "type": "import",
-                "source": "code_analysis"
+                "type": "import"
             })
 
-        # For functions, get called functions as dependencies
-        if isinstance(element, FunctionDeclaration):
-            calls = self._get_node_calls(element)
-            for call in calls:
-                dependencies.append({
-                    "name": call.get("name", ""),
-                    "type": "function_call",
-                    "call_type": call.get("type", "unknown")
-                })
-
-        # For contracts, get inheritance dependencies
-        if isinstance(element, ContractDeclaration):
-            inheritance = getattr(element, 'inheritance', [])
-            for base in inheritance:
-                dependencies.append({
-                    "name": base,
-                    "type": "inheritance",
-                    "source": "contract_hierarchy"
-                })
+        # Get inheritance dependencies for contracts
+        inheritance = getattr(element, 'inheritance', [])
+        for base in inheritance:
+            dependencies.append({
+                "name": base,
+                "type": "inheritance"
+            })
 
         return dependencies
 
@@ -3030,9 +2717,19 @@ class SolidityQueryEngineV2:
         }
 
         if isinstance(element, FunctionDeclaration):
-            # Get functions this element calls
+            # Get functions this element calls (already filtered to exclude builtins)
             calls = self._get_node_calls(element)
-            call_graph["calls_made"] = [call.get("name", "") for call in calls]
+
+            # Remove duplicates while preserving order
+            unique_calls = []
+            seen_calls = set()
+            for call in calls:
+                call_name = call.get("name", "")
+                if call_name and call_name not in seen_calls:
+                    unique_calls.append(call_name)
+                    seen_calls.add(call_name)
+
+            call_graph["calls_made"] = unique_calls
 
             # Get functions that call this element
             callers = self._get_node_callers(element)
@@ -3042,8 +2739,9 @@ class SolidityQueryEngineV2:
             element_name = getattr(element, 'name', '')
             call_graph["is_recursive"] = element_name in call_graph["calls_made"]
 
-            # Calculate approximate call depth
-            call_graph["call_depth"] = len(call_graph["calls_made"])
+            # Calculate call depth as maximum depth of nested calls (simplified)
+            # For now, using 1 if there are calls, 0 if none
+            call_graph["call_depth"] = 1 if call_graph["calls_made"] else 0
 
         return call_graph
 
@@ -3059,10 +2757,15 @@ class SolidityQueryEngineV2:
         # Get variable access patterns
         variables = self._get_node_variables(element)
         for var in variables:
-            if var.get("access_type") == "read":
-                data_flow["variables_read"].append(var.get("name", ""))
-            elif var.get("access_type") == "write":
-                data_flow["variables_written"].append(var.get("name", ""))
+            var_name = var.get("name", "")
+            # Filter out malformed or partial variable names
+            if (var_name and var_name.strip() and
+                not var_name.endswith('(') and '(' not in var_name and
+                len(var_name) > 1):
+                if var.get("access_type") == "read":
+                    data_flow["variables_read"].append(var_name)
+                elif var.get("access_type") == "write":
+                    data_flow["variables_written"].append(var_name)
 
         # Check for external interactions
         if self._has_external_calls(element):
@@ -3075,59 +2778,6 @@ class SolidityQueryEngineV2:
 
         return data_flow
 
-    def _get_element_security_analysis(self, element: ASTNode) -> Dict[str, Any]:
-        """Get security analysis for an element."""
-        security_analysis = {
-            "risk_level": "low",
-            "issues": [],
-            "recommendations": []
-        }
-
-        # Check for common security issues
-        if isinstance(element, FunctionDeclaration):
-            issues = []
-
-            # Check for reentrancy risks
-            if (self._has_external_calls(element) and
-                self._changes_state(element)):
-                issues.append({
-                    "type": "reentrancy_risk",
-                    "severity": "high",
-                    "description": "Function makes external calls and modifies state"
-                })
-                security_analysis["recommendations"].append("Add reentrancy guard")
-
-            # Check for missing access control
-            visibility = getattr(element, 'visibility', None)
-            modifiers = getattr(element, 'modifiers', [])
-            if (str(visibility).lower() in ['external', 'public'] and
-                not any('only' in str(mod).lower() for mod in modifiers)):
-                issues.append({
-                    "type": "missing_access_control",
-                    "severity": "medium",
-                    "description": "Public/external function without access control"
-                })
-                security_analysis["recommendations"].append("Add access control modifier")
-
-            # Check for unchecked external calls
-            source = getattr(element, 'source_code', '')
-            if '.call(' in source and '(bool success,' not in source:
-                issues.append({
-                    "type": "unchecked_call",
-                    "severity": "medium",
-                    "description": "External call result not checked"
-                })
-                security_analysis["recommendations"].append("Check call return value")
-
-            security_analysis["issues"] = issues
-
-            # Determine overall risk level
-            if any(issue["severity"] == "high" for issue in issues):
-                security_analysis["risk_level"] = "high"
-            elif any(issue["severity"] == "medium" for issue in issues):
-                security_analysis["risk_level"] = "medium"
-
-        return security_analysis
 
     def _build_call_chains(self, element: ASTNode, max_depth: int) -> List[List[str]]:
         """Build call chains for an element."""
@@ -3183,6 +2833,392 @@ class SolidityQueryEngineV2:
     def _get_element_calls(self, element: ASTNode) -> List[Dict[str, str]]:
         """Get calls made by an element."""
         return self._get_node_calls(element)
+
+    def _check_for_external_calls_recursive(self, ts_node) -> bool:
+        """Recursively traverse tree-sitter nodes to find external calls."""
+        if not ts_node:
+            return False
+
+        node_type = ts_node.type
+
+        # Check for call expressions
+        if node_type == "call_expression":
+            call_info = self._analyze_call_expression(ts_node)
+            if call_info and call_info.get('type') in ['external', 'low_level']:
+                return True
+
+        # Check for member access that might be external calls
+        elif node_type == "member_access":
+            member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+            if member_text:
+                # Check for low-level calls first
+                if any(method in member_text for method in ['call', 'delegatecall', 'staticcall', 'send', 'transfer']):
+                    return True
+                # Check for external contract calls (exclude builtins)
+                builtin_members = {
+                    'msg.sender', 'msg.value', 'msg.data', 'msg.sig',
+                    'block.timestamp', 'block.number', 'block.coinbase',
+                    'tx.origin', 'tx.gasprice'
+                }
+                if '.' in member_text and member_text not in builtin_members:
+                    # This could be an external contract call
+                    return True
+
+        # Recursively check children
+        for child in ts_node.children:
+            if self._check_for_external_calls_recursive(child):
+                return True
+
+        return False
+
+    def _check_for_state_changes_recursive(self, ts_node) -> bool:
+        """Recursively traverse tree-sitter nodes to find state changes."""
+        if not ts_node:
+            return False
+
+        node_type = ts_node.type
+
+        # Check for assignment operations
+        if node_type in ["assignment_operator", "assignment_expression"]:
+            return True
+
+        # Check for compound assignments (+=, -=, *=, /=)
+        elif node_type in ["augmented_assignment_operator", "compound_assignment"]:
+            return True
+
+        # Check for update expressions (++, --)
+        elif node_type in ["update_expression", "unary_expression"]:
+            return self._is_update_expression(ts_node)
+
+        # Check for function calls that modify state
+        elif node_type == "call_expression":
+            call_info = self._analyze_call_expression(ts_node)
+            if call_info:
+                call_name = call_info.get('name', '').lower()
+                # State-modifying function patterns
+                state_modifying_calls = {'push', 'pop', 'delete', 'transfer', 'send'}
+                if any(method in call_name for method in state_modifying_calls):
+                    return True
+
+        # Check for member access assignments (e.g., balances[user] = amount)
+        elif node_type == "index_access":
+            # Check if this index access is on the left side of an assignment
+            parent = ts_node.parent
+            if parent and parent.type == "assignment_operator":
+                # Check if this is the left operand
+                if parent.children and parent.children[0] == ts_node:
+                    return True
+
+        # Check for delete statements
+        elif node_type == "delete_statement":
+            return True
+
+        # Check for storage variable declarations with assignments
+        elif node_type == "variable_declaration":
+            var_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+            if 'storage' in var_text and '=' in var_text:
+                return True
+
+        # Recursively check children
+        for child in ts_node.children:
+            if self._check_for_state_changes_recursive(child):
+                return True
+
+        return False
+
+    def _check_for_asset_transfers_recursive(self, ts_node) -> bool:
+        """Recursively traverse tree-sitter nodes to find asset transfers."""
+        if not ts_node:
+            return False
+
+        node_type = ts_node.type
+
+        # Check for function calls that might be asset transfers
+        if node_type == "call_expression":
+            call_info = self._analyze_call_expression(ts_node)
+            if call_info:
+                call_name = call_info.get('name', '').lower()
+                # Asset transfer function patterns
+                transfer_functions = {
+                    'transfer', 'send', 'safetransfer', 'transferfrom', '_transfer'
+                }
+                if any(func in call_name for func in transfer_functions):
+                    return True
+
+        # Check for member access that indicates asset transfers
+        elif node_type == "member_access":
+            member_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+            if member_text:
+                # Check for Ether transfer methods
+                ether_transfer_methods = {'transfer', 'send'}
+                if any(f'.{method}' in member_text for method in ether_transfer_methods):
+                    return True
+
+        # Check for call expressions with value field (e.g., call{value: amount})
+        elif node_type == "call_options":
+            # This indicates a call with options like {value: ...}
+            options_text = ts_node.text.decode('utf-8') if ts_node.text else ''
+            if 'value' in options_text.lower():
+                return True
+
+        # Check for payable cast expressions
+        elif node_type == "call_expression":
+            # Look for payable(...) patterns
+            for child in ts_node.children:
+                if child.type == "identifier":
+                    func_name = child.text.decode('utf-8') if child.text else ''
+                    if func_name == 'payable':
+                        return True
+
+        # Recursively check children
+        for child in ts_node.children:
+            if self._check_for_asset_transfers_recursive(child):
+                return True
+
+        return False
+
+    def _traverse_node_for_calls(self, ts_node, calls: List[Dict[str, Any]], found_calls: set):
+        """Recursively traverse tree-sitter nodes to find function calls."""
+        if not ts_node:
+            return
+
+        node_type = ts_node.type
+
+        # Identify function call patterns
+        if node_type == "call_expression":
+            call_info = self._analyze_call_expression(ts_node)
+            if call_info and call_info.get('type') != 'builtin':  # Exclude builtin calls
+                call_key = f"{call_info['name']}_{call_info['position']}"
+                if call_key not in found_calls:
+                    calls.append(call_info)
+                    found_calls.add(call_key)
+
+        elif node_type in ["member_access", "member_expression", "member_access_expression"]:
+            # Check if this member access is part of a low-level call
+            member_call = self._analyze_member_call(ts_node)
+            if member_call:
+                call_key = f"{member_call['name']}_{member_call['position']}"
+                if call_key not in found_calls:
+                    calls.append(member_call)
+                    found_calls.add(call_key)
+
+        # Recursively traverse children
+        for child in ts_node.children:
+            self._traverse_node_for_calls(child, calls, found_calls)
+
+    def _traverse_node_for_statements(self, ts_node, statements: List[Dict[str, Any]], found_statements: set, parent_node: ASTNode):
+        """Recursively traverse tree-sitter nodes to find statements."""
+        if not ts_node:
+            return
+
+        node_type = ts_node.type
+
+        # Identify statement patterns
+        if node_type in [
+            "expression_statement", "return_statement", "if_statement",
+            "for_statement", "while_statement", "emit_statement",
+            "assembly_statement", "variable_declaration_statement"
+        ]:
+            stmt_info = self._analyze_statement(ts_node, parent_node)
+            if stmt_info:
+                stmt_key = f"{stmt_info['type']}_{stmt_info['position']}"
+                if stmt_key not in found_statements:
+                    statements.append(stmt_info)
+                    found_statements.add(stmt_key)
+
+        # Continue traversing child nodes
+        for child in ts_node.children:
+            self._traverse_node_for_statements(child, statements, found_statements, parent_node)
+
+    def _traverse_node_for_variables(self, ts_node, variables: List[Dict[str, Any]], found_vars: set, parent_node: ASTNode, parent_context=None):
+        """Recursively traverse tree-sitter nodes to find variable access."""
+        if not ts_node:
+            return
+
+        node_type = ts_node.type
+
+        # Skip certain contexts where identifiers are not variables
+        skip_contexts = {
+            'function_definition', 'constructor_definition', 'modifier_definition',
+            'function_call', 'modifier_invocation', 'parameter_list', 'type_name',
+            'function_type', 'event_definition', 'struct_definition', 'enum_definition'
+        }
+
+        if parent_context in skip_contexts:
+            # Still traverse children but don't capture variables in these contexts
+            for child in ts_node.children:
+                self._traverse_node_for_variables(child, variables, found_vars, parent_node, node_type)
+            return
+
+        # Handle member access first (e.g., msg.sender, block.timestamp)
+        if node_type in ["member_access", "member_expression"]:
+            member_info = self._analyze_member_access(ts_node)
+            if member_info and member_info['name'] not in found_vars:
+                variables.append(member_info)
+                found_vars.add(member_info['name'])
+            # Don't traverse children of member_access to avoid processing individual parts
+            return
+
+        # Handle array/mapping access like balances[user]
+        elif node_type == "index_access":
+            index_info = self._analyze_index_access(ts_node, parent_context)
+            if index_info and index_info['name'] not in found_vars:
+                variables.append(index_info)
+                found_vars.add(index_info['name'])
+            # Still traverse children to find variables in the index expression
+
+        # Handle standalone identifiers (but only in appropriate contexts)
+        elif node_type == "identifier":
+            # Skip if this identifier is part of contexts where it's not a variable
+            skip_identifier_contexts = {
+                'member_access', 'call_expression', 'emit_statement',
+                'function_call', 'modifier_invocation', 'event_definition',
+                'function_definition', 'constructor_definition'
+            }
+            if parent_context in skip_identifier_contexts:
+                pass  # Skip identifiers in these contexts
+            else:
+                var_name = ts_node.text.decode('utf-8') if ts_node.text else None
+                if var_name and var_name not in found_vars:
+                    var_info = self._analyze_identifier_context(ts_node, var_name, parent_context)
+                    if var_info:
+                        variables.append(var_info)
+                        found_vars.add(var_name)
+
+        # Recursively traverse children
+        for child in ts_node.children:
+            self._traverse_node_for_variables(child, variables, found_vars, parent_node, node_type)
+
+    def _check_operators_recursive(self, ts_node, operators: List[str]) -> bool:
+        if not ts_node:
+            return False
+
+        # Map operator strings to AST node types
+        operator_node_types = {
+            '+': ['binary_expression'],
+            '-': ['binary_expression'],
+            '*': ['binary_expression'],
+            '/': ['binary_expression'],
+            '%': ['binary_expression'],
+            '++': ['update_expression', 'increment_expression'],
+            '--': ['update_expression', 'decrement_expression'],
+            '+=': ['augmented_assignment_operator'],
+            '-=': ['augmented_assignment_operator'],
+            '*=': ['augmented_assignment_operator'],
+            '/=': ['augmented_assignment_operator'],
+            '==': ['binary_expression'],
+            '!=': ['binary_expression'],
+            '<': ['binary_expression'],
+            '>': ['binary_expression'],
+            '<=': ['binary_expression'],
+            '>=': ['binary_expression'],
+            '&&': ['binary_expression'],
+            '||': ['binary_expression'],
+            '!': ['unary_expression']
+        }
+
+        # Check if this node type matches any requested operators
+        for op in operators:
+            if op in operator_node_types:
+                if ts_node.type in operator_node_types[op]:
+                    return True
+
+        # Recursively check children
+        for child in ts_node.children:
+            if self._check_operators_recursive(child, operators):
+                return True
+
+        return False
+
+    def _find_emit_statements_recursive(self, ts_node, events: List[Dict[str, Any]]):
+        """Recursively find emit statements in the AST."""
+        if not ts_node:
+            return
+
+        node_type = ts_node.type
+
+        # Look for emit statements
+        if node_type == "emit_statement":
+            # Find the event name being emitted
+            for child in ts_node.children:
+                if child.type == "expression":
+                    # Find the event identifier within the expression
+                    for expr_child in child.children:
+                        if expr_child.type == "identifier":
+                            event_name = expr_child.text.decode('utf-8') if expr_child.text else None
+                            if event_name:
+                                events.append({
+                                    'name': event_name,
+                                    'position': expr_child.start_byte
+                                })
+                            break
+                    break
+
+        # Also look for emit keyword followed by call expressions
+        elif node_type == "identifier" and ts_node.text and ts_node.text.decode('utf-8') == "emit":
+            # Check if the next sibling is a call expression
+            parent = ts_node.parent
+            if parent:
+                found_emit = False
+                for child in parent.children:
+                    if child == ts_node:
+                        found_emit = True
+                    elif found_emit and child.type == "call_expression":
+                        # Extract event name from the call
+                        for call_child in child.children:
+                            if call_child.type == "identifier":
+                                event_name = call_child.text.decode('utf-8') if call_child.text else None
+                                if event_name:
+                                    events.append({
+                                        'name': event_name,
+                                        'position': call_child.start_byte
+                                    })
+                                break
+                        break
+
+        # Recursively check children
+        for child in ts_node.children:
+            self._find_emit_statements_recursive(child, events)
+
+    def _find_dependencies_recursive(self, ts_node, dependencies: List[str]):
+        """Recursively find dependencies in the AST."""
+        if not ts_node:
+            return
+
+        node_type = ts_node.type
+
+        # Look for import statements
+        if node_type == "import_directive":
+            for child in ts_node.children:
+                if child.type == "string":
+                    import_path = child.text.decode('utf-8').strip('"\'') if child.text else None
+                    if import_path:
+                        dependencies.append(import_path)
+
+        # Look for using directives
+        elif node_type == "using_for_directive":
+            for child in ts_node.children:
+                if child.type == "identifier":
+                    library_name = child.text.decode('utf-8') if child.text else None
+                    if library_name:
+                        dependencies.append(library_name)
+                        break
+
+        # Look for inheritance
+        elif node_type == "inheritance_specifier":
+            for child in ts_node.children:
+                if child.type == "user_defined_type":
+                    # Get the inherited contract name
+                    for type_child in child.children:
+                        if type_child.type == "identifier":
+                            base_contract = type_child.text.decode('utf-8') if type_child.text else None
+                            if base_contract:
+                                dependencies.append(base_contract)
+                                break
+
+        # Recursively check children
+        for child in ts_node.children:
+            self._find_dependencies_recursive(child, dependencies)
 
     def _find_element_by_name(self, name: str) -> Optional[ASTNode]:
         """Find an element by name across all node types."""

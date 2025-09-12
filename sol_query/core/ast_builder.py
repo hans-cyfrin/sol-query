@@ -242,13 +242,15 @@ class ASTBuilder:
         if body_node:
             children = self._build_children(body_node)
             for child in children:
+                # Set parent reference only for declaration nodes that have this field
+                if hasattr(child, 'parent_contract'):
+                    child.parent_contract = contract
+
                 if isinstance(child, FunctionDeclaration):
-                    child.parent_contract = contract  # Set parent reference
                     contract.functions.append(child)
                 elif isinstance(child, ModifierDeclaration):
                     contract.modifiers.append(child)
                 elif isinstance(child, VariableDeclaration):
-                    child.parent_contract = contract  # Set parent reference
                     contract.variables.append(child)
                 elif isinstance(child, EventDeclaration):
                     contract.events.append(child)

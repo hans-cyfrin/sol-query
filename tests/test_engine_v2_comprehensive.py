@@ -74,11 +74,11 @@ class TestQueryCodeBattleLevel:
         # Debug: Print the result if it fails
         if not result["success"]:
             print(f"Query failed: {result}")
-            
+
         assert result["success"] is True, f"Query failed: {result.get('errors', 'Unknown error')}"
         # Note: result_count might be 0 if no functions match all criteria
         assert result["query_info"]["result_count"] >= 0
-        
+
         # Verify each result matches ALL criteria (if any results found)
         for func in result["data"]["results"]:
             if "visibility" in func:
@@ -88,7 +88,7 @@ class TestQueryCodeBattleLevel:
                 assert not func.get("modifiers", [])  # Should have no modifiers
             # Should have external calls in source (if source is available)
             if "source_code" in func and func["source_code"]:
-                has_calls = any(pattern in func["source_code"] 
+                has_calls = any(pattern in func["source_code"]
                               for pattern in [".call(", ".transfer(", ".send(", "IERC20("])
                 # Only assert if we expect external calls based on our filter
                 if not has_calls:
@@ -106,22 +106,22 @@ class TestQueryCodeBattleLevel:
             include=["source", "calls", "variables"])
 
         assert result["success"] is True, f"Query failed: {result.get('errors', 'Unknown error')}"
-        
+
         # These should be flagged as potential reentrancy risks
         vulnerable_functions = result["data"]["results"]
         # Note: May be 0 if no functions match the criteria in fixtures
         print(f"Found {len(vulnerable_functions)} potentially vulnerable functions")
         assert len(vulnerable_functions) >= 0
-        
+
         for func in vulnerable_functions:
             source = func.get("source_code", "")
             if source:  # Only check if source code is available
                 # Should have both external calls and state changes
-                has_external_call = any(pattern in source 
+                has_external_call = any(pattern in source
                                       for pattern in [".call(", ".transfer(", "IERC20(", "require("])
-                has_state_change = any(pattern in source 
+                has_state_change = any(pattern in source
                                      for pattern in ["=", "++", "--", "push(", "pop("])
-                
+
                 # Log findings for debugging
                 if not has_external_call:
                     print(f"Function {func.get('name', 'unknown')} may not have detectable external calls")
@@ -138,7 +138,7 @@ class TestQueryCodeBattleLevel:
             include=["source"])
 
         assert result["success"] is True, f"Query failed: {result.get('errors', 'Unknown error')}"
-        
+
         print(f"Found {len(result['data']['results'])} payable functions with transfers")
         for func in result["data"]["results"]:
             if "state_mutability" in func:
@@ -146,7 +146,7 @@ class TestQueryCodeBattleLevel:
             # Should have asset transfer patterns
             source = func.get("source_code", "")
             if source:
-                has_transfer = any(pattern in source 
+                has_transfer = any(pattern in source
                                  for pattern in [".transfer(", ".send(", ".call{value:"])
                 if not has_transfer:
                     print(f"Payable function {func.get('name', 'unknown')} may not have detectable transfers")
@@ -163,7 +163,7 @@ class TestQueryCodeBattleLevel:
             include=["source"])
 
         assert result["success"] is True, f"Query failed: {result.get('errors', 'Unknown error')}"
-        
+
         print(f"Found {len(result['data']['results'])} state variables with mapping types")
         for var in result["data"]["results"]:
             if "is_state_variable" in var:
@@ -182,7 +182,7 @@ class TestQueryCodeBattleLevel:
             include=["source"])
 
         assert result["success"] is True, f"Query failed: {result.get('errors', 'Unknown error')}"
-        
+
         print(f"Found {len(result['data']['results'])} for loop statements")
         for stmt in result["data"]["results"]:
             source = stmt.get("source_code", "")
@@ -199,7 +199,7 @@ class TestQueryCodeBattleLevel:
             include=["source"])
 
         assert result["success"] is True, f"Query failed: {result.get('errors', 'Unknown error')}"
-        
+
         print(f"Found {len(result['data']['results'])} expressions with division operators")
         for expr in result["data"]["results"]:
             source = expr.get("source_code", "")
@@ -220,7 +220,7 @@ class TestQueryCodeBattleLevel:
             include=["source"])
 
         assert result["success"] is True, f"Query failed: {result.get('errors', 'Unknown error')}"
-        
+
         print(f"Found {len(result['data']['results'])} low-level calls with value transfers")
         # Note: May not find results if fixtures don't have this pattern
         # But should not error
@@ -238,12 +238,12 @@ class TestQueryCodeBattleLevel:
             })
 
         assert result["success"] is True
-        
+
         # All results should be from specified contracts and functions
         for func in result["data"]["results"]:
             func_name = func.get("name", "")
             contract = func.get("location", {}).get("contract", "")
-            
+
             if contract:  # If contract info is available
                 assert contract in ["Token", "RETHVault"]
             if func_name:  # If function name is available
@@ -253,7 +253,7 @@ class TestQueryCodeBattleLevel:
         """Test all include options thoroughly."""
         result = loaded_engine.query_code("functions",
             filters={"visibility": ["external"]},
-            include=["source", "ast", "calls", "callers", "variables", 
+            include=["source", "ast", "calls", "callers", "variables",
                     "events", "modifiers", "natspec", "dependencies"],
             options={"max_results": 3})
 
@@ -281,11 +281,11 @@ class TestQueryCodeBattleLevel:
             include=["source"])
 
         assert result["success"] is True
-        
+
         for func in result["data"]["results"]:
             name = func.get("name", "")
             matches_pattern = (
-                re.search(r".*[Ww]ithdraw.*", name) or 
+                re.search(r".*[Ww]ithdraw.*", name) or
                 re.search(r".*[Tt]ransfer.*", name)
             )
             assert matches_pattern, f"Function name {name} should match pattern"
@@ -324,7 +324,7 @@ class TestGetDetailsBattleLevel:
             analysis_depth="basic")
 
         assert result["success"] is True
-        
+
         for identifier, analysis in result["data"]["elements"].items():
             if analysis.get("found"):
                 basic_info = analysis["basic_info"]
@@ -339,7 +339,7 @@ class TestGetDetailsBattleLevel:
             options={"include_source": True, "include_assembly": True})
 
         assert result["success"] is True
-        
+
         for identifier, analysis in result["data"]["elements"].items():
             if analysis.get("found"):
                 assert "basic_info" in analysis
@@ -354,7 +354,7 @@ class TestGetDetailsBattleLevel:
             options={"check_standards": True})
 
         assert result["success"] is True
-        
+
         for identifier, analysis in result["data"]["elements"].items():
             if analysis.get("found"):
                 assert "comprehensive_info" in analysis
@@ -372,13 +372,13 @@ class TestGetDetailsBattleLevel:
             options={"check_standards": True, "include_tests": False})
 
         assert result["success"] is True
-        
+
         for identifier, analysis in result["data"]["elements"].items():
             if analysis.get("found"):
                 assert "basic_info" in analysis
                 basic = analysis["basic_info"]
-                assert basic["type"] == "ContractDeclaration"
-                
+                assert basic["type"] == "contract"
+
                 if "context" in analysis:
                     context = analysis["context"]
                     assert "file_context" in context
@@ -391,8 +391,8 @@ class TestGetDetailsBattleLevel:
             include_context=True)
 
         assert result["success"] is True
-        
-        found_variables = [id for id, analysis in result["data"]["elements"].items() 
+
+        found_variables = [id for id, analysis in result["data"]["elements"].items()
                           if analysis.get("found")]
         assert len(found_variables) > 0
 
@@ -403,7 +403,7 @@ class TestGetDetailsBattleLevel:
             analysis_depth="detailed")
 
         assert result["success"] is True
-        
+
         # Should find functions even with signature format
         for identifier, analysis in result["data"]["elements"].items():
             if analysis.get("found"):
@@ -419,7 +419,7 @@ class TestGetDetailsBattleLevel:
             analysis_depth="basic")
 
         assert result["success"] is True
-        
+
         # Should handle qualified names
         for identifier, analysis in result["data"]["elements"].items():
             if analysis.get("found"):
@@ -440,7 +440,7 @@ class TestFindReferencesBattleLevel:
             options={"show_call_chains": True})
 
         assert result["success"] is True
-        
+
         if result["data"]["references"]["usages"]:
             for usage in result["data"]["references"]["usages"]:
                 assert "location" in usage
@@ -455,7 +455,7 @@ class TestFindReferencesBattleLevel:
             filters={"contracts": ["Token"]})
 
         assert result["success"] is True
-        
+
         # Should find both usages and definitions
         references = result["data"]["references"]
         assert "usages" in references
@@ -469,7 +469,7 @@ class TestFindReferencesBattleLevel:
             max_depth=5)
 
         assert result["success"] is True
-        
+
         # IERC20 interface should be used in multiple contracts
         usages = result["data"]["references"]["usages"]
         # May or may not find usages depending on how references are tracked
@@ -493,12 +493,12 @@ class TestFindReferencesBattleLevel:
     def test_call_chain_analysis(self, loaded_engine):
         """Test call chain building."""
         result = loaded_engine.find_references("deposit", "function",
-            reference_type="usages", 
+            reference_type="usages",
             max_depth=2,
             options={"show_call_chains": True})
 
         assert result["success"] is True
-        
+
         if result["data"]["references"].get("call_chains"):
             call_chains = result["data"]["references"]["call_chains"]
             assert isinstance(call_chains, list)
@@ -533,7 +533,7 @@ class TestSecurityAnalysisBattleLevel:
             include=["source", "calls", "variables"])
 
         assert result["success"] is True
-        
+
         # Analyze each function for reentrancy patterns
         vulnerable_functions = []
         for func in result["data"]["results"]:
@@ -542,7 +542,7 @@ class TestSecurityAnalysisBattleLevel:
                 # Check for external call before state change pattern
                 lines = source.split('\n')
                 has_external_call_before_state_change = False
-                
+
                 for i, line in enumerate(lines):
                     if any(pattern in line for pattern in ['.call(', '.transfer(', 'IERC20(']):
                         # Look for state changes after this line
@@ -550,10 +550,10 @@ class TestSecurityAnalysisBattleLevel:
                             if '=' in lines[j] and '==' not in lines[j]:
                                 has_external_call_before_state_change = True
                                 break
-                
+
                 if has_external_call_before_state_change:
                     vulnerable_functions.append(func["name"])
-        
+
         # Should find some potentially vulnerable functions
         print(f"Found {len(vulnerable_functions)} potentially vulnerable functions")
 
@@ -568,13 +568,13 @@ class TestSecurityAnalysisBattleLevel:
             include=["source", "modifiers"])
 
         assert result["success"] is True
-        
+
         unprotected_functions = []
         for func in result["data"]["results"]:
             # Skip view/pure functions as they don't modify state
             if func.get("state_mutability") not in ["view", "pure"]:
                 unprotected_functions.append(func["name"])
-        
+
         # Should find some unprotected functions
         print(f"Found {len(unprotected_functions)} potentially unprotected functions")
 
@@ -588,13 +588,13 @@ class TestSecurityAnalysisBattleLevel:
             include=["source"])
 
         assert result["success"] is True
-        
+
         unsafe_operations = []
         for expr in result["data"]["results"]:
             source = expr.get("source_code", "")
             if source and "SafeMath" not in source and "unchecked" not in source:
                 unsafe_operations.append(expr)
-        
+
         print(f"Found {len(unsafe_operations)} potentially unsafe arithmetic operations")
 
     def test_external_call_validation(self, loaded_engine):
@@ -606,7 +606,7 @@ class TestSecurityAnalysisBattleLevel:
             include=["source"])
 
         assert result["success"] is True
-        
+
         unchecked_calls = []
         for func in result["data"]["results"]:
             source = func.get("source_code", "")
@@ -614,7 +614,7 @@ class TestSecurityAnalysisBattleLevel:
                 # Look for .call( without checking return value
                 if ".call(" in source and "(bool success," not in source:
                     unchecked_calls.append(func["name"])
-        
+
         print(f"Found {len(unchecked_calls)} functions with potentially unchecked calls")
 
 
@@ -660,23 +660,23 @@ class TestPerformanceAndEdgeCases:
             filters={"visibility": ["external"]})
 
         assert external_functions["success"] is True
-        
+
         # Then analyze each function in detail
         if external_functions["data"]["results"]:
-            function_names = [f["name"] for f in external_functions["data"]["results"] 
+            function_names = [f["name"] for f in external_functions["data"]["results"]
                             if f.get("name")][:3]  # Limit to first 3
-            
+
             if function_names:
                 detailed_analysis = loaded_engine.get_details("function",
                     function_names,
                     analysis_depth="comprehensive")
-                
+
                 assert detailed_analysis["success"] is True
 
     def test_memory_usage_with_includes(self, loaded_engine):
         """Test memory usage with all include options."""
         result = loaded_engine.query_code("functions",
-            include=["source", "ast", "calls", "callers", "variables", 
+            include=["source", "ast", "calls", "callers", "variables",
                     "events", "modifiers", "natspec", "dependencies",
                     "inheritance", "implementations", "overrides"],
             options={"max_results": 5})
@@ -693,13 +693,13 @@ class TestPerformanceAndEdgeCases:
             ("statements", {"statement_types": ["require"]}),
             ("contracts", {"contract_types": ["contract"]})
         ]
-        
+
         results = []
         for query_type, filters in queries:
             result = loaded_engine.query_code(query_type, filters=filters)
             assert result["success"] is True
             results.append(result)
-        
+
         # All queries should succeed
         assert len(results) == len(queries)
 
@@ -710,17 +710,17 @@ class TestErrorHandlingAndValidation:
     def test_invalid_query_types(self, loaded_engine):
         """Test handling of invalid query types."""
         result = loaded_engine.query_code("invalid_type")
-        
+
         assert result["success"] is False
         assert "validation_errors" in result["query_info"]
-        assert any("Invalid query_type" in error["error"] 
+        assert any("Invalid query_type" in error["error"]
                   for error in result["query_info"]["validation_errors"])
 
     def test_invalid_filter_values(self, loaded_engine):
         """Test handling of invalid filter values."""
         result = loaded_engine.query_code("functions",
             filters={"visibility": ["invalid_visibility"]})
-        
+
         assert result["success"] is False
         assert "validation_errors" in result["query_info"]
 
@@ -729,25 +729,25 @@ class TestErrorHandlingAndValidation:
         result = loaded_engine.get_details("function",
             ["transfer"],
             analysis_depth="invalid_depth")
-        
+
         assert result["success"] is False
 
     def test_invalid_reference_parameters(self, loaded_engine):
         """Test handling of invalid reference parameters."""
         result = loaded_engine.find_references("test", "invalid_type")
-        
+
         assert result["success"] is False
 
     def test_empty_identifiers(self, loaded_engine):
         """Test handling of empty identifiers."""
         result = loaded_engine.get_details("function", [])
-        
+
         assert result["success"] is False
 
     def test_negative_max_depth(self, loaded_engine):
         """Test handling of negative max_depth."""
         result = loaded_engine.find_references("test", "function", max_depth=-5)
-        
+
         assert result["success"] is False
 
 
@@ -760,34 +760,34 @@ class TestRealWorldScenarios:
         external_funcs = loaded_engine.query_code("functions",
             filters={"visibility": ["external", "public"]},
             include=["source", "modifiers"])
-        
+
         assert external_funcs["success"] is True
-        
+
         # Step 2: Check for access control issues
         unprotected = loaded_engine.query_code("functions",
             filters={
                 "visibility": ["external", "public"],
                 "modifiers": []
             })
-        
+
         assert unprotected["success"] is True
-        
+
         # Step 3: Find reentrancy risks
         reentrancy_risks = loaded_engine.query_code("functions",
             filters={
                 "has_external_calls": True,
                 "changes_state": True
             })
-        
+
         assert reentrancy_risks["success"] is True
-        
+
         # Step 4: Analyze critical functions in detail
         if external_funcs["data"]["results"]:
             critical_functions = [f["name"] for f in external_funcs["data"]["results"][:2]]
             detailed = loaded_engine.get_details("function",
                 critical_functions,
                 analysis_depth="comprehensive")
-            
+
             assert detailed["success"] is True
 
     def test_code_review_workflow(self, loaded_engine):
@@ -796,23 +796,23 @@ class TestRealWorldScenarios:
         state_changing = loaded_engine.query_code("functions",
             filters={"changes_state": True},
             include=["source", "variables"])
-        
+
         assert state_changing["success"] is True
-        
+
         # Find all external calls
         external_calls = loaded_engine.query_code("calls",
             filters={"call_types": ["call", "delegatecall"]},
             include=["source"])
-        
+
         assert external_calls["success"] is True
-        
+
         # Analyze dependencies
         if state_changing["data"]["results"]:
             func_name = state_changing["data"]["results"][0].get("name")
             if func_name:
                 references = loaded_engine.find_references(func_name, "function",
                     reference_type="all")
-                
+
                 assert references["success"] is True
 
     def test_refactoring_impact_analysis(self, loaded_engine):
@@ -821,16 +821,16 @@ class TestRealWorldScenarios:
         result = loaded_engine.find_references("transfer", "function",
             reference_type="usages",
             direction="both")
-        
+
         assert result["success"] is True
-        
+
         # Find all functions that might be affected
         if result["data"]["references"]["usages"]:
             # Analyze call chains to understand impact
             call_chain_result = loaded_engine.find_references("transfer", "function",
                 options={"show_call_chains": True},
                 max_depth=3)
-            
+
             assert call_chain_result["success"] is True
 
 
@@ -841,7 +841,7 @@ class TestResponseFormatConsistency:
         """Test query_code response format consistency."""
         result = loaded_engine.query_code("functions",
             filters={"visibility": ["external"]})
-        
+
         # Check required fields
         assert "success" in result
         assert "query_info" in result
@@ -849,7 +849,7 @@ class TestResponseFormatConsistency:
         assert "metadata" in result
         assert "warnings" in result
         assert "errors" in result
-        
+
         # Check query_info structure
         query_info = result["query_info"]
         assert "function" in query_info
@@ -857,7 +857,7 @@ class TestResponseFormatConsistency:
         assert "execution_time" in query_info
         assert "result_count" in query_info
         assert "cache_hit" in query_info
-        
+
         # Check metadata structure
         metadata = result["metadata"]
         assert "analysis_scope" in metadata
@@ -871,12 +871,12 @@ class TestResponseFormatConsistency:
         result = loaded_engine.get_details("function",
             ["transfer"],
             analysis_depth="detailed")
-        
+
         assert "success" in result
         assert "query_info" in result
         assert "data" in result
         assert "metadata" in result
-        
+
         if result["success"] and result["data"]["elements"]:
             elements = result["data"]["elements"]
             for identifier, analysis in elements.items():
@@ -887,17 +887,17 @@ class TestResponseFormatConsistency:
     def test_find_references_response_format(self, loaded_engine):
         """Test find_references response format consistency."""
         result = loaded_engine.find_references("transfer", "function")
-        
+
         assert "success" in result
         assert "query_info" in result
         assert "data" in result
         assert "metadata" in result
-        
+
         if result["success"]:
             data = result["data"]
             assert "target_info" in data
             assert "references" in data
-            
+
             references = data["references"]
             assert "usages" in references
             assert "definitions" in references
@@ -908,7 +908,7 @@ class TestResponseFormatConsistency:
         query_error = loaded_engine.query_code("invalid_type")
         details_error = loaded_engine.get_details("function", [])
         references_error = loaded_engine.find_references("test", "invalid_type")
-        
+
         for error_result in [query_error, details_error, references_error]:
             assert error_result["success"] is False
             assert "query_info" in error_result

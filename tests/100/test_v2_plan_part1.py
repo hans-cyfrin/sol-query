@@ -1,5 +1,5 @@
 from typing import Any, Dict
-
+import json
 import pytest
 
 
@@ -12,13 +12,13 @@ def _assert_visibility_in(values, allowed):
 
 def test_01_query_contracts_in_simplecontract(engine):
     resp = engine.query_code("contracts", {}, {"files": [".*SimpleContract.sol"]})
-    print("Contracts(SimpleContract):", resp)
+    print("Contracts(SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     # Expect exactly one contract named SimpleContract
     assert len(results) == 1
     c = results[0]
-    assert c.get("type") == "ContractDeclaration"
+    assert c.get("type") == "contract"
     assert c.get("name") == "SimpleContract"
 
     # Validate exact location details
@@ -35,7 +35,7 @@ def test_01_query_contracts_in_simplecontract(engine):
 
 def test_02_query_functions_in_simplecontract(engine):
     resp = engine.query_code("functions", {}, {"files": [".*SimpleContract.sol"]})
-    print("Functions(SimpleContract):", resp)
+    print("Functions(SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
     expected_subset = {"pureFunction", "viewFunction", "setValue", "deposit", "internalHelper", "privateHelper"}
@@ -89,7 +89,7 @@ def test_02_query_functions_in_simplecontract(engine):
 
 def test_03_query_variables_in_simplecontract(engine):
     resp = engine.query_code("variables", {}, {"files": [".*SimpleContract.sol"]})
-    print("Variables(SimpleContract):", resp)
+    print("Variables(SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     # Expect two state variables: value (uint256), owner (address)
@@ -115,7 +115,7 @@ def test_03_query_variables_in_simplecontract(engine):
 
 def test_04_query_events_in_erc721imports(engine):
     resp = engine.query_code("events", {}, {"files": [".*ERC721WithImports.sol"]})
-    print("Events(ERC721WithImports):", resp)
+    print("Events(ERC721WithImports):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     names = {r.get("name"): r for r in results}
@@ -124,20 +124,20 @@ def test_04_query_events_in_erc721imports(engine):
 
     # Validate TokenMinted event details
     token_minted = names["TokenMinted"]
-    assert token_minted.get("type") == "EventDeclaration"
+    assert token_minted.get("type") == "event"
     assert token_minted.get("location", {}).get("line") == 23
     assert str(token_minted.get("location", {}).get("file")).endswith("ERC721WithImports.sol")
 
     # Validate PriceUpdated event details
     price_updated = names["PriceUpdated"]
-    assert price_updated.get("type") == "EventDeclaration"
+    assert price_updated.get("type") == "event"
     assert price_updated.get("location", {}).get("line") == 24
     assert str(price_updated.get("location", {}).get("file")).endswith("ERC721WithImports.sol")
 
 
 def test_05_query_modifiers_in_simplecontract(engine):
     resp = engine.query_code("modifiers", {}, {"files": [".*SimpleContract.sol"]})
-    print("Modifiers(SimpleContract):", resp)
+    print("Modifiers(SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     names = {r.get("name"): r for r in results}
@@ -146,14 +146,14 @@ def test_05_query_modifiers_in_simplecontract(engine):
     # Validate onlyOwner modifier details
     only_owner_item = next((r for r in results if r.get("name") == "onlyOwner"), None)
     assert only_owner_item is not None
-    assert only_owner_item.get("type") == "ModifierDeclaration"
+    assert only_owner_item.get("type") == "modifier"
     assert only_owner_item.get("location", {}).get("line") == 11
     assert str(only_owner_item.get("location", {}).get("file")).endswith("SimpleContract.sol")
 
 
 def test_06_query_errors_none_expected(engine):
     resp = engine.query_code("errors", {}, {"files": [".*SimpleContract.sol"]})
-    print("Errors(SimpleContract):", resp)
+    print("Errors(SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     assert results == []
@@ -161,14 +161,14 @@ def test_06_query_errors_none_expected(engine):
 
 def test_07_query_all_structs(engine):
     resp = engine.query_code("structs")
-    print("Structs(all):", resp)
+    print("Structs(all):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     # Should find UserData struct in sample_contract.sol
     results = resp.get("data", {}).get("results", [])
     assert len(results) == 1
     struct = results[0]
     assert struct.get("name") == "UserData"
-    assert struct.get("type") == "StructDeclaration"
+    assert struct.get("type") == "struct"
 
     # Validate UserData struct details
     assert str(struct.get("location", {}).get("file")).endswith("sample_contract.sol")
@@ -178,7 +178,7 @@ def test_07_query_all_structs(engine):
 
 def test_08_query_all_enums(engine):
     resp = engine.query_code("enums")
-    print("Enums(all):", resp)
+    print("Enums(all):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     # In current fixtures, no enums are defined
     assert resp.get("data", {}).get("results", []) == []
@@ -186,7 +186,7 @@ def test_08_query_all_enums(engine):
 
 def test_09_query_statements(engine):
     resp = engine.query_code("statements", {}, {"files": [".*SimpleContract.sol"]})
-    print("Statements(SimpleContract):", resp)
+    print("Statements(SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     assert isinstance(results, list)
@@ -195,7 +195,7 @@ def test_09_query_statements(engine):
 
 def test_10_query_expressions(engine):
     resp = engine.query_code("expressions", {}, {"files": [".*SimpleContract.sol"]})
-    print("Expressions(SimpleContract):", resp)
+    print("Expressions(SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     assert isinstance(results, list)
@@ -204,7 +204,7 @@ def test_10_query_expressions(engine):
 
 def test_11_query_calls(engine):
     resp = engine.query_code("calls")
-    print("Calls(all):", resp)
+    print("Calls(all):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     names = {str(r.get("name")) for r in results}
@@ -215,7 +215,7 @@ def test_11_query_calls(engine):
 
 def test_12_query_flow_placeholder(engine):
     resp = engine.query_code("flow")
-    print("Flow(all):", resp)
+    print("Flow(all):", json.dumps(resp, indent=2))
     # Valid query_type; implementation returns empty results
     assert resp.get("success") is True
     assert resp.get("data", {}).get("results", []) == []
@@ -223,7 +223,7 @@ def test_12_query_flow_placeholder(engine):
 
 def test_13_functions_by_name_regex(engine):
     resp = engine.query_code("functions", {"names": "transfer.*"})
-    print("Functions(names=transfer.*):", resp)
+    print("Functions(names=transfer.*):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
     # Expect presence of known functions
@@ -236,7 +236,7 @@ def test_13_functions_by_name_regex(engine):
     # transferOwnership should be from sample_contract.sol Token or MultipleInheritance.sol
     if "transferOwnership" in items:
         transfer_ownership = items["transferOwnership"]
-        assert transfer_ownership.get("type") == "FunctionDeclaration"
+        assert transfer_ownership.get("type") == "function"
         assert "transfer" in transfer_ownership.get("name").lower()
         # Basic query_code doesn't include modifiers, so just check signature
         assert transfer_ownership.get("signature") == "transferOwnership(address)"
@@ -244,7 +244,7 @@ def test_13_functions_by_name_regex(engine):
 
 def test_14_functions_by_multiple_names(engine):
     resp = engine.query_code("functions", {"names": ["approve", ".*mint.*"]})
-    print("Functions(names=approve|.*mint.*):", resp)
+    print("Functions(names=approve|.*mint.*):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
     # Approve may not exist in local fixtures; ensure known mints exist
@@ -253,7 +253,7 @@ def test_14_functions_by_multiple_names(engine):
 
 def test_15_functions_by_visibility(engine):
     resp = engine.query_code("functions", {"visibility": ["public", "external"]})
-    print("Functions(visibility=public|external):", resp)
+    print("Functions(visibility=public|external):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
     # Spot-check presence of known public/external functions
@@ -272,7 +272,7 @@ def test_16_functions_by_state_mutability_view(engine):
 
 def test_17_functions_no_modifiers(engine):
     resp = engine.query_code("functions", {"modifiers": []}, {"files": [".*SimpleContract.sol"]})
-    print("Functions(no modifiers, SimpleContract):", resp)
+    print("Functions(no modifiers, SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
     assert "deposit" in names and "setValue" not in names
@@ -280,7 +280,7 @@ def test_17_functions_no_modifiers(engine):
 
 def test_18_functions_with_modifiers(engine):
     resp = engine.query_code("functions", {"modifiers": ["only.*"]})
-    print("Functions(modifiers=only.*):", resp)
+    print("Functions(modifiers=only.*):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
     # Expect functions guarded by only* modifiers across fixtures
@@ -290,7 +290,7 @@ def test_18_functions_with_modifiers(engine):
 
 def test_19_functions_filtered_by_contract_names(engine):
     resp = engine.query_code("functions", {"contracts": [".*Token.*", ".*ERC721.*"]})
-    print("Functions(contracts=.*Token.*|.*ERC721.*):", resp)
+    print("Functions(contracts=.*Token.*|.*ERC721.*):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
     # Expect functions from MultiInheritanceToken and ERC721WithImports
@@ -299,7 +299,7 @@ def test_19_functions_filtered_by_contract_names(engine):
 
 def test_20_variables_by_type_patterns(engine):
     resp = engine.query_code("variables", {"types": ["uint.*", "mapping.*"]})
-    print("Variables(types=uint.*|mapping.*):", resp)
+    print("Variables(types=uint.*|mapping.*):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     names = {r.get("name"): r for r in resp.get("data", {}).get("results", [])}
     # Expect known variables from fixtures

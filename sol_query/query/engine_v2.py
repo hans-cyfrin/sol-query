@@ -967,12 +967,24 @@ class SolidityQueryEngineV2:
         results = []
 
         for node in nodes:
+            # Get name with fallback to source code for expressions/statements
+            node_name = getattr(node, 'name', None)
+            if node_name is None and hasattr(node, 'get_source_code'):
+                # For expressions and statements without names, use source code
+                source_code = node.get_source_code()
+                if source_code:
+                    # Limit length and clean up whitespace
+                    node_name = ' '.join(source_code.split())
+                    if len(node_name) > 100:
+                        node_name = node_name[:97] + "..."
+
             result_item = {
-                "id": getattr(node, 'id', None),
-                "name": getattr(node, 'name', None),
-                "type": type(node).__name__,
+                "name": node_name,
                 "location": self._get_node_location(node)
             }
+
+            node_class_name = type(node).__name__
+            result_item["type"] = self._get_user_friendly_type(node_class_name)
 
             # Add basic node-specific info
             if isinstance(node, FunctionDeclaration):
@@ -988,7 +1000,8 @@ class SolidityQueryEngineV2:
                 })
             elif isinstance(node, VariableDeclaration):
                 result_item.update({
-                    "type_name": str(getattr(node, 'type_name', '')),
+                    "variable_type": str(getattr(node, 'type_name', '')),
+                    "type_name": str(getattr(node, 'type_name', '')),  # Keep for backward compatibility
                     "visibility": getattr(node, 'visibility', None).value if hasattr(getattr(node, 'visibility', None), 'value') else (str(getattr(node, 'visibility', '')) or None),
                     "is_state_variable": (node.is_state_variable() if hasattr(node, 'is_state_variable') and callable(getattr(node, 'is_state_variable')) else (getattr(node, 'visibility', None) is not None))
                 })
@@ -1161,11 +1174,36 @@ class SolidityQueryEngineV2:
 
         return result
 
+    def _get_user_friendly_type(self, node_class_name: str) -> str:
+        """Get user-friendly type name from AST node class name."""
+        class_to_type_map = {
+            "FunctionDeclaration": "function",
+            "ContractDeclaration": "contract",
+            "VariableDeclaration": "variable",
+            "EventDeclaration": "event",
+            "ModifierDeclaration": "modifier",
+            "StructDeclaration": "struct",
+            "EnumDeclaration": "enum",
+            "ErrorDeclaration": "error",
+            "ExtractedExpression": "expression",
+            "ExtractedStatement": "statement",
+            "CallNode": "call",
+            "ImportDeclaration": "import",
+            "PragmaDeclaration": "pragma",
+            "UsingDeclaration": "using",
+            "StateVariableDeclaration": "variable",
+            "Identifier": "identifier"
+        }
+        return class_to_type_map.get(node_class_name, node_class_name.replace("Declaration", "").lower())
+
     def _get_basic_element_info(self, element: ASTNode) -> Dict[str, Any]:
         """Get basic information about an element."""
+        node_class_name = type(element).__name__
+        element_type = self._get_user_friendly_type(node_class_name)
+
         return {
             "name": getattr(element, 'name', None),
-            "type": type(element).__name__,
+            "type": element_type,
             "location": self._get_node_location(element),
             "signature": element.get_signature() if isinstance(element, FunctionDeclaration) and hasattr(element, 'get_signature') else None
         }
@@ -1388,7 +1426,7 @@ class SolidityQueryEngineV2:
             "location": self._get_node_location(element),
             "definition_type": "primary",
             "context": getattr(element, 'source_code', ''),
-            "element_type": type(element).__name__,
+            "element_type": self._get_user_friendly_type(type(element).__name__),
             "name": element_name
         }
         definitions.append(primary_def)
@@ -1401,7 +1439,7 @@ class SolidityQueryEngineV2:
                     "location": self._get_node_location(override),
                     "definition_type": "override",
                     "context": getattr(override, 'source_code', ''),
-                    "element_type": type(override).__name__,
+                    "element_type": self._get_user_friendly_type(type(override).__name__),
                     "name": getattr(override, 'name', '')
                 })
 
@@ -1413,7 +1451,7 @@ class SolidityQueryEngineV2:
                     "location": self._get_node_location(interface_def),
                     "definition_type": "interface",
                     "context": getattr(interface_def, 'source_code', ''),
-                    "element_type": type(interface_def).__name__,
+                    "element_type": self._get_user_friendly_type(type(interface_def).__name__),
                     "name": getattr(interface_def, 'name', '')
                 })
 
@@ -1517,8 +1555,15 @@ class SolidityQueryEngineV2:
         contract_name = None
         if isinstance(node, FunctionDeclaration) and getattr(node, 'parent_contract', None):
             contract_name = getattr(node.parent_contract, 'name', None)
+        elif isinstance(node, VariableDeclaration) and getattr(node, 'parent_contract', None):
+            contract_name = getattr(node.parent_contract, 'name', None)
         elif isinstance(node, ContractDeclaration):
             contract_name = getattr(node, 'name', None)
+        elif hasattr(node, 'parent_function') and getattr(node, 'parent_function', None):
+            # For ExtractedStatement and similar nodes, get contract from parent function
+            parent_func = getattr(node, 'parent_function', None)
+            if parent_func and getattr(parent_func, 'parent_contract', None):
+                contract_name = getattr(parent_func.parent_contract, 'name', None)
 
         # Use SourceLocation when available
         file_path = None
@@ -1534,7 +1579,7 @@ class SolidityQueryEngineV2:
                 pass
 
         return {
-            "file": file_path,
+            "file": str(file_path) if file_path is not None else None,
             "line": line,
             "column": column,
             "contract": contract_name
@@ -2805,7 +2850,7 @@ class SolidityQueryEngineV2:
         """Get inheritance details for a contract."""
         return {
             'base_contracts': getattr(node, 'inheritance', []),
-            'is_abstract': getattr(node, 'is_abstract', False),
+            'is_abstract': node.is_abstract() if hasattr(node, 'is_abstract') and callable(getattr(node, 'is_abstract')) else False,
             'interfaces': getattr(node, 'interfaces', []),
             'override_functions': getattr(node, 'override_functions', [])
         }

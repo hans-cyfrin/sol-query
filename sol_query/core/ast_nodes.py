@@ -444,6 +444,11 @@ class ModifierDeclaration(ASTNode):
 
     node_type: NodeType = Field(default=NodeType.MODIFIER, frozen=True)
     name: str = Field(description="Modifier name")
+    parent_contract: Optional["ContractDeclaration"] = Field(
+        default=None,
+        description="Reference to the parent contract",
+        exclude=True  # Exclude from serialization to avoid circular references
+    )
     parameters: List[Parameter] = Field(
         default_factory=list,
         description="Modifier parameters"
@@ -467,6 +472,11 @@ class EventDeclaration(ASTNode):
 
     node_type: NodeType = Field(default=NodeType.EVENT, frozen=True)
     name: str = Field(description="Event name")
+    parent_contract: Optional["ContractDeclaration"] = Field(
+        default=None,
+        description="Reference to the parent contract",
+        exclude=True  # Exclude from serialization to avoid circular references
+    )
     parameters: List[Parameter] = Field(
         default_factory=list,
         description="Event parameters"
@@ -482,6 +492,11 @@ class ErrorDeclaration(ASTNode):
 
     node_type: NodeType = Field(default=NodeType.ERROR, frozen=True)
     name: str = Field(description="Error name")
+    parent_contract: Optional["ContractDeclaration"] = Field(
+        default=None,
+        description="Reference to the parent contract",
+        exclude=True  # Exclude from serialization to avoid circular references
+    )
     parameters: List[Parameter] = Field(
         default_factory=list,
         description="Error parameters"
@@ -497,6 +512,11 @@ class StructDeclaration(ASTNode):
 
     node_type: NodeType = Field(default=NodeType.STRUCT, frozen=True)
     name: str = Field(description="Struct name")
+    parent_contract: Optional["ContractDeclaration"] = Field(
+        default=None,
+        description="Reference to the parent contract",
+        exclude=True  # Exclude from serialization to avoid circular references
+    )
     fields: List["StructMember"] = Field(
         default_factory=list,
         description="Struct fields"
@@ -528,6 +548,11 @@ class EnumDeclaration(ASTNode):
 
     node_type: NodeType = Field(default=NodeType.ENUM, frozen=True)
     name: str = Field(description="Enum name")
+    parent_contract: Optional["ContractDeclaration"] = Field(
+        default=None,
+        description="Reference to the parent contract",
+        exclude=True  # Exclude from serialization to avoid circular references
+    )
     values: List[str] = Field(
         default_factory=list,
         description="Enum values"

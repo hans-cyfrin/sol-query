@@ -1,6 +1,7 @@
+import json
 def test_41_include_events(engine):
     resp = engine.query_code("functions", {}, {"files": [".*ERC721WithImports.sol"]}, ["events"])
-    print("Functions(include=events, ERC721WithImports):", resp)
+    print("Functions(include=events, ERC721WithImports):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     item = next((r for r in resp.get("data", {}).get("results", []) if r.get("name") == "mint"), None)
     assert item is not None
@@ -19,7 +20,7 @@ def test_41_include_events(engine):
 
 def test_42_include_modifiers(engine):
     resp = engine.query_code("functions", {}, {"files": [".*SimpleContract.sol"]}, ["modifiers"])
-    print("Functions(include=modifiers, SimpleContract):", resp)
+    print("Functions(include=modifiers, SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     items = {r.get("name"): r for r in resp.get("data", {}).get("results", [])}
 
@@ -40,7 +41,7 @@ def test_42_include_modifiers(engine):
 
 def test_43_include_natspec(engine):
     resp = engine.query_code("functions", {}, {"files": [".*SimpleContract.sol"]}, ["natspec"])
-    print("Functions(include=natspec, SimpleContract):", resp)
+    print("Functions(include=natspec, SimpleContract):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     # No NatSpec in fixture; expect empty/None fields
     item = next((r for r in resp.get("data", {}).get("results", []) if r.get("name") == "setValue"), None)
@@ -49,7 +50,7 @@ def test_43_include_natspec(engine):
 
 def test_44_contracts_include_dependencies(engine):
     resp = engine.query_code("contracts", {}, {"files": [".*ERC721WithImports.sol"]}, ["dependencies"])
-    print("Contracts(include=dependencies, ERC721WithImports):", resp)
+    print("Contracts(include=dependencies, ERC721WithImports):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     assert len(results) > 0
@@ -73,7 +74,7 @@ def test_44_contracts_include_dependencies(engine):
 
 def test_45_contracts_include_inheritance(engine):
     resp = engine.query_code("contracts", {}, {"files": [".*ERC721WithImports.sol"]}, ["inheritance"])
-    print("Contracts(include=inheritance, ERC721WithImports):", resp)
+    print("Contracts(include=inheritance, ERC721WithImports):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     item = next((r for r in resp.get("data", {}).get("results", []) if r.get("name") == "ERC721WithImports"), None)
     assert item is not None
@@ -114,7 +115,7 @@ def test_47_combined_filters_names_visibility_mutability(engine):
         "visibility": ["public", "external"],
         "state_mutability": ["view", "pure"],
     })
-    print("Functions(names=balance, vis=pub/ext, mut=view/pure):", resp)
+    print("Functions(names=balance, vis=pub/ext, mut=view/pure):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate that all returned functions match the combined filters
@@ -137,7 +138,7 @@ def test_48_combined_filters_modifiers_changes_state(engine):
         "modifiers": [".*Owner.*", ".*Admin.*"],
         "changes_state": True,
     })
-    print("Functions(modifiers=Owner/Admin, changes_state):", resp)
+    print("Functions(modifiers=Owner/Admin, changes_state):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate combined filters work correctly
@@ -146,7 +147,7 @@ def test_48_combined_filters_modifiers_changes_state(engine):
         # Should have state-changing functions with Owner/Admin modifiers
         assert func.get("changes_state") is True or func.get("state_mutability") in {"nonpayable", "payable"}
         # Modifier validation would need modifier information to be included
-        assert func.get("type") == "FunctionDeclaration"
+        assert func.get("type") == "function"
 
 
 def test_49_combined_filters_external_calls_and_call_types(engine):
@@ -154,14 +155,14 @@ def test_49_combined_filters_external_calls_and_call_types(engine):
         "has_external_calls": True,
         "call_types": ["external"],
     })
-    print("Functions(has_external_calls, call_types=external):", resp)
+    print("Functions(has_external_calls, call_types=external):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate functions are external or make external calls
     results = resp.get("data", {}).get("results", [])
     for func in results:
         # API applies the filter correctly, so results should be valid
-        assert func.get("type") == "FunctionDeclaration"
+        assert func.get("type") == "function"
         # Should find functions that make external calls or have external visibility
         func_name = func.get("name", "")
         assert func_name  # Should have a name
@@ -175,14 +176,14 @@ def test_50_combined_filters_asset_transfers_low_level(engine):
         "has_asset_transfers": True,
         "low_level": True,
     })
-    print("Functions(has_asset_transfers & low_level):", resp)
+    print("Functions(has_asset_transfers & low_level):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate functions are filtered correctly for asset transfers and low-level
     results = resp.get("data", {}).get("results", [])
     for func in results:
         # API applies the filter correctly, so results should be valid
-        assert func.get("type") == "FunctionDeclaration"
+        assert func.get("type") == "function"
         # These functions should involve asset transfers and low-level operations
         func_name = func.get("name", "").lower()
         assert "transfer" in func_name or "withdraw" in func_name or "pay" in func_name
@@ -194,7 +195,7 @@ def test_51_variables_types_and_scope(engine):
     }, {
         "contracts": [".*Pool.*", ".*Token.*"]
     })
-    print("Variables(types & scope contracts=Pool/Token):", resp)
+    print("Variables(types & scope contracts=Pool/Token):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate variables match type and scope filters
@@ -213,7 +214,7 @@ def test_51_variables_types_and_scope(engine):
 
 def test_52_events_with_source_and_ast(engine):
     resp = engine.query_code("events", {}, {"files": [".*ERC721WithImports.sol"]}, ["source", "ast"])
-    print("Events(include=source,ast in ERC721WithImports):", resp)
+    print("Events(include=source,ast in ERC721WithImports):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
     items = {r.get("name"): r for r in results}
@@ -242,7 +243,7 @@ def test_52_events_with_source_and_ast(engine):
 
 def test_53_modifiers_in_specific_files(engine):
     resp = engine.query_code("modifiers", {}, {"files": ["composition_and_imports/.*"]})
-    print("Modifiers(files=composition_and_imports):", resp)
+    print("Modifiers(files=composition_and_imports):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate modifiers are found in composition_and_imports files
@@ -260,7 +261,7 @@ def test_53_modifiers_in_specific_files(engine):
 
 def test_54_errors_in_directory(engine):
     resp = engine.query_code("errors", {}, {"directories": ["tests/fixtures/detailed_scenarios"]})
-    print("Errors(dir=detailed_scenarios):", resp)
+    print("Errors(dir=detailed_scenarios):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate directory scope works
@@ -270,12 +271,12 @@ def test_54_errors_in_directory(engine):
         location = error.get("location", {})
         file_path = str(location.get("file", ""))
         assert "detailed_scenarios" in file_path
-        assert error.get("type") == "ErrorDeclaration"
+        assert error.get("type") == "error"
 
 
 def test_55_statements_loops(engine):
     resp = engine.query_code("statements", {"statement_types": ["for", "while", "do"]}, {"files": [".*ERC721WithImports.sol"]})
-    print("Statements(loops in ERC721WithImports):", resp)
+    print("Statements(loops in ERC721WithImports):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate loop statements are properly filtered
@@ -292,14 +293,14 @@ def test_55_statements_loops(engine):
 
 def test_56_expressions_logical(engine):
     resp = engine.query_code("expressions", {"operators": ["&&", "||", "!"]}, {"files": [".*ERC721WithImports.sol"]})
-    print("Expressions(logical in ERC721WithImports):", resp)
+    print("Expressions(logical in ERC721WithImports):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate expressions are filtered correctly
     results = resp.get("data", {}).get("results", [])
     for expr in results:
         # API filters expressions correctly, validate basic structure
-        assert expr.get("type") == "ExtractedExpression"
+        assert expr.get("type") == "expression"
 
         # Should be from ERC721WithImports.sol
         location = expr.get("location", {})
@@ -313,7 +314,7 @@ def test_56_expressions_logical(engine):
 
 def test_57_variables_name_patterns(engine):
     resp = engine.query_code("variables", {"names": [".*supply.*", ".*owner.*"]})
-    print("Variables(names like supply/owner):", resp)
+    print("Variables(names like supply/owner):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate variables match name patterns
@@ -321,7 +322,7 @@ def test_57_variables_name_patterns(engine):
     for var in results:
         var_name = var.get("name", "").lower()
         assert "supply" in var_name or "owner" in var_name, f"Variable name '{var_name}' doesn't match pattern"
-        assert var.get("type") == "VariableDeclaration"
+        assert var.get("type") == "variable"
 
     # Should find variables like totalSupply, maxSupply, owner
     var_names = {r.get("name") for r in results}
@@ -331,7 +332,7 @@ def test_57_variables_name_patterns(engine):
 
 def test_58_calls_filtered_by_names(engine):
     resp = engine.query_code("calls", {"names": ["transfer", "withdraw"]})
-    print("Calls(names include transfer/withdraw):", resp)
+    print("Calls(names include transfer/withdraw):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate calls are filtered correctly
@@ -341,7 +342,7 @@ def test_58_calls_filtered_by_names(engine):
         # API filters calls correctly - call names should contain transfer or withdraw
         assert "transfer" in call_name or "withdraw" in call_name, f"Call name '{call_name}' doesn't contain expected patterns"
         assert "location" in call
-        assert call.get("type") == "CallNode"
+        assert call.get("type") == "call"
 
     # Should find transfer and/or withdraw calls in fixtures
     if results:
@@ -352,7 +353,7 @@ def test_58_calls_filtered_by_names(engine):
 
 def test_59_contracts_deps_and_inheritance(engine):
     resp = engine.query_code("contracts", {}, {}, ["dependencies", "inheritance"])
-    print("Contracts(include deps & inheritance):", resp)
+    print("Contracts(include deps & inheritance):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate contracts include dependencies and inheritance info
@@ -360,7 +361,7 @@ def test_59_contracts_deps_and_inheritance(engine):
     assert len(results) > 0, "Should find contracts in fixtures"
 
     for contract in results:
-        assert contract.get("type") == "ContractDeclaration"
+        assert contract.get("type") == "contract"
         # Should have dependencies and inheritance_details when requested
         assert "dependencies" in contract
         assert "inheritance_details" in contract
@@ -377,7 +378,7 @@ def test_59_contracts_deps_and_inheritance(engine):
 
 def test_60_functions_include_all(engine):
     resp = engine.query_code("functions", {}, {}, ["source", "ast", "calls", "variables", "events", "modifiers"])
-    print("Functions(include all):", resp)
+    print("Functions(include all):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     # Validate functions include all requested additional information
@@ -386,7 +387,7 @@ def test_60_functions_include_all(engine):
 
     # Check that functions have all the requested include fields
     for func in results[:3]:  # Check first 3 functions
-        assert func.get("type") == "FunctionDeclaration"
+        assert func.get("type") == "function"
 
         # All functions should have these fields when requested
         expected_fields = {"source_code", "ast_info", "calls", "variables", "events", "modifiers"}

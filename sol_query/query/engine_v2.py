@@ -423,7 +423,7 @@ class SolidityQueryEngineV2:
         errors = []
 
         # Validate target_type
-        valid_target_types = ["function", "variable", "contract", "modifier", "event", "struct", "enum"]
+        valid_target_types = ["function", "variable", "contract", "modifier", "event", "struct", "enum", "statement", "expression", "type"]
         if target_type not in valid_target_types:
             errors.append({
                 "parameter": "target_type",
@@ -735,6 +735,10 @@ class SolidityQueryEngineV2:
         elif filter_name == "low_level":
             return self._filter_by_low_level_calls(nodes, filter_value)
 
+        # Struct field filters
+        elif filter_name == "field_patterns":
+            return self._filter_by_field_patterns(nodes, filter_value)
+
         return nodes
 
     def _filter_by_names(self, nodes: List[ASTNode], name_patterns: Union[str, List[str]]) -> List[ASTNode]:
@@ -828,6 +832,35 @@ class SolidityQueryEngineV2:
             return False
 
         return self._check_for_state_changes_recursive(node.raw_node)
+
+    def _filter_by_field_patterns(self, nodes: List[ASTNode], field_patterns: Union[str, List[str]]) -> List[ASTNode]:
+        """Filter struct nodes by field name patterns."""
+        if isinstance(field_patterns, str):
+            field_patterns = [field_patterns]
+
+        filtered = []
+        for node in nodes:
+            if isinstance(node, StructDeclaration):
+                # Check if any field name matches any pattern
+                for field in node.fields:
+                    field_name = getattr(field, 'name', '')
+                    for pattern in field_patterns:
+                        if self._matches_pattern(field_name, pattern):
+                            filtered.append(node)
+                            break  # Found a match, add the node and break
+                    else:
+                        continue
+                    break  # Break outer loop if we added the node
+            else:
+                # For non-struct nodes, don't filter (field patterns only apply to structs)
+                continue
+        return filtered
+
+    def _is_regex_pattern(self, pattern: str) -> bool:
+        """Check if a string is intended as a regex pattern."""
+        # Common regex metacharacters that indicate regex usage
+        regex_metacharacters = set('.^$*+?{}[]|()\\')
+        return any(char in pattern for char in regex_metacharacters)
 
     def _matches_pattern(self, text: str, pattern: str) -> bool:
         """Check if text matches pattern (exact or regex)."""
@@ -1070,12 +1103,19 @@ class SolidityQueryEngineV2:
         node_class_name = type(element).__name__
         element_type = self._get_user_friendly_type(node_class_name)
 
-        return {
+        basic_info = {
             "name": getattr(element, 'name', None),
             "type": element_type,
             "location": self._get_node_location(element),
             "signature": element.get_signature() if isinstance(element, FunctionDeclaration) and hasattr(element, 'get_signature') else None
         }
+
+        # Add type-specific information to basic_info
+        if isinstance(element, VariableDeclaration):
+            basic_info["type_name"] = getattr(element, 'type_name', None)
+            basic_info["visibility"] = str(element.visibility) if hasattr(element, 'visibility') else None
+
+        return basic_info
 
     def _get_detailed_element_info(self, element: ASTNode, options: Dict[str, Any]) -> Dict[str, Any]:
         """Get detailed information about an element."""
@@ -1091,6 +1131,16 @@ class SolidityQueryEngineV2:
             # Include calls in detailed analysis
             info["calls"] = self._get_node_calls(element)
 
+        elif isinstance(element, ContractDeclaration):
+            # Add contract-specific detailed information
+            info["inheritance"] = element.inheritance if hasattr(element, 'inheritance') else []
+            info["functions"] = [{"name": f.name, "visibility": str(f.visibility) if hasattr(f, 'visibility') else None}
+                               for f in element.functions] if hasattr(element, 'functions') else []
+            info["variables"] = [{"name": v.name, "type": getattr(v, 'type_name', None)}
+                               for v in element.variables] if hasattr(element, 'variables') else []
+            info["events"] = [{"name": e.name} for e in element.events] if hasattr(element, 'events') else []
+            info["modifiers"] = [{"name": m.name} for m in element.modifiers] if hasattr(element, 'modifiers') else []
+
         return info
 
     def _get_comprehensive_element_info(self, element: ASTNode) -> Dict[str, Any]:
@@ -1103,6 +1153,10 @@ class SolidityQueryEngineV2:
 
     def _find_target_element(self, target: str, target_type: str) -> Optional[ASTNode]:
         """Find the target element for reference analysis."""
+        # Handle special target types that don't have direct AST nodes
+        if target_type in ["statement", "expression", "type"]:
+            return self._create_synthetic_element(target, target_type)
+
         elements = self._find_elements_by_identifiers(target_type, [target])
         element = elements.get(target)
 
@@ -1126,6 +1180,18 @@ class SolidityQueryEngineV2:
 
         return element
 
+    def _create_synthetic_element(self, target: str, target_type: str):
+        """Create a synthetic element for special target types."""
+        # Create a simple object with the necessary attributes
+        class SyntheticElement:
+            def __init__(self, name: str, element_type: str):
+                self.name = name
+                self.element_type = element_type
+                self.source_code = ""
+                self.source_location = None
+
+        return SyntheticElement(target, target_type)
+
     def _find_element_references(self, target_element: ASTNode,
                                reference_type: str, direction: str,
                                max_depth: int, filters: Dict[str, Any],
@@ -1138,23 +1204,50 @@ class SolidityQueryEngineV2:
             "max_depth_reached": 0
         }
 
+        # Apply cross-contract filter to the filters if requested
+        actual_filters = filters.copy()
+        if options.get("cross_contract_only", False):
+            actual_filters["cross_contract_only"] = True
+            # Add target contract info for cross-contract filtering
+            target_location = self._get_node_location(target_element)
+            actual_filters["target_contract"] = target_location.get("contract")
+
+        # Apply inherited references option
+        if options.get("include_inherited", False):
+            actual_filters["include_inherited"] = True
+
         # Find usages
         if reference_type in ["all", "usages"]:
-            usages = self._find_element_usages(target_element, direction, max_depth, filters)
+            usages = self._find_element_usages(target_element, direction, max_depth, actual_filters)
+
+            # Apply additional options processing
+            if options.get("show_usage_patterns", False):
+                usages = self._enhance_with_usage_patterns(usages)
+
+            if options.get("include_source_context", False):
+                usages = self._enhance_with_source_context(usages)
+
+            if options.get("security_analysis", False):
+                usages = self._enhance_with_security_analysis(usages)
+
             references["usages"] = usages
 
         # Find definitions
         if reference_type in ["all", "definitions"]:
-            definitions = self._find_element_definitions(target_element, direction, max_depth, filters)
+            definitions = self._find_element_definitions(target_element, direction, max_depth, actual_filters)
             references["definitions"] = definitions
 
         # Build call chains if requested
         if options.get("show_call_chains", False):
             references["call_chains"] = self._build_call_chains(target_element, max_depth)
 
+        # Add aggregation data if requested
+        if options.get("aggregate_by_contract", False):
+            references["aggregation"] = self._create_reference_aggregation(references)
+
         return references
 
-    def _find_element_usages(self, element: ASTNode, _direction: str, _max_depth: int, _filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _find_element_usages(self, element: ASTNode, direction: str, max_depth: int, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Find where an element is used."""
         usages = []
         element_name = getattr(element, 'name', '')
@@ -1162,19 +1255,18 @@ class SolidityQueryEngineV2:
         if not element_name:
             return usages
 
-        # Search in all relevant nodes (simplified for now)
-        search_nodes = self._get_all_nodes()
-
-        for node in search_nodes:
-            usage_info = self._analyze_element_usage_in_node(element, node)
-            if usage_info:
-                # Apply filters if provided (simplified for now)
-                if True:  # TODO: implement filtering with _filters
-                    usages.append(usage_info)
-
-                    # Stop if we've reached max depth or max results
-                    if len(usages) >= 100:  # Reasonable limit
-                        break
+        # Use different strategies based on element type
+        if isinstance(element, FunctionDeclaration):
+            usages.extend(self._find_function_usages(element, direction, max_depth, filters))
+        elif isinstance(element, VariableDeclaration):
+            usages.extend(self._find_variable_usages(element, direction, max_depth, filters))
+        elif isinstance(element, EventDeclaration):
+            usages.extend(self._find_event_usages(element, direction, max_depth, filters))
+        elif isinstance(element, ModifierDeclaration):
+            usages.extend(self._find_modifier_usages(element, direction, max_depth, filters))
+        else:
+            # Generic approach for other types (including statement, expression, type)
+            usages.extend(self._find_generic_usages(element, direction, max_depth, filters))
 
         return usages
 
@@ -1257,6 +1349,158 @@ class SolidityQueryEngineV2:
 
         return source[:100] + "..." if len(source) > 100 else source
 
+    def _find_function_usages(self, function: FunctionDeclaration, direction: str, max_depth: int, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find usages of a function (calls to the function)."""
+        usages = []
+        function_name = getattr(function, 'name', '')
+
+        # Use the existing query_code method to find function calls
+        try:
+            # Get all calls in the codebase using the query engine
+            calls_resp = self.query_code('calls')
+            if calls_resp.get('success'):
+                all_calls = calls_resp['data']['results']
+
+                # Filter for calls to this function
+                for call_data in all_calls:
+                    call_name = call_data.get('name', '')
+                    # Match exact name or related patterns (e.g., _transfer for transfer)
+                    if (call_name == function_name or
+                        (call_name.startswith('_') and call_name[1:] == function_name) or
+                        (function_name.startswith('_') and function_name[1:] == call_name)):
+
+                        usage_info = {
+                            "location": call_data.get('location', {}),
+                            "usage_type": "function_call",
+                            "context": call_data.get('source_code', ''),
+                            "node_type": call_data.get('type', 'call'),
+                            "element_name": call_name,
+                            "source_snippet": call_data.get('source_code', '')[:200] + "..." if len(call_data.get('source_code', '')) > 200 else call_data.get('source_code', '')
+                        }
+
+                        if self._usage_passes_filters(usage_info, filters):
+                            usages.append(usage_info)
+        except Exception as e:
+            # Fallback to simpler analysis if call analyzer fails
+            usages.extend(self._find_generic_usages(function, direction, max_depth, filters))
+
+        return usages
+
+    def _find_variable_usages(self, variable: VariableDeclaration, direction: str, max_depth: int, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find usages of a variable (reads/writes)."""
+        usages = []
+        variable_name = getattr(variable, 'name', '')
+
+        # Search through all nodes for variable usage
+        all_nodes = self._get_all_nodes()
+
+        for node in all_nodes:
+            if node == variable:  # Skip the variable definition itself
+                continue
+
+            node_source = getattr(node, 'source_code', '')
+            if variable_name in node_source:
+                # Determine usage type
+                usage_type = "variable_read"
+                if f"{variable_name} =" in node_source or f"{variable_name}=" in node_source:
+                    usage_type = "assignment"
+                elif f"{variable_name}[" in node_source:
+                    usage_type = "array_access"
+                elif f"{variable_name}." in node_source:
+                    usage_type = "member_access"
+
+                usage_info = {
+                    "location": self._get_node_location(node),
+                    "usage_type": usage_type,
+                    "context": self._extract_usage_context(variable_name, node_source),
+                    "node_type": type(node).__name__,
+                    "element_name": variable_name,
+                    "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source
+                }
+
+                if self._usage_passes_filters(usage_info, filters):
+                    usages.append(usage_info)
+
+        return usages
+
+    def _find_event_usages(self, event: EventDeclaration, direction: str, max_depth: int, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find usages of an event (emit statements)."""
+        usages = []
+        event_name = getattr(event, 'name', '')
+
+        # Search for emit statements
+        all_nodes = self._get_all_nodes()
+
+        for node in all_nodes:
+            node_source = getattr(node, 'source_code', '')
+            if f"emit {event_name}" in node_source:
+                usage_info = {
+                    "location": self._get_node_location(node),
+                    "usage_type": "event_emit",
+                    "context": self._extract_usage_context(event_name, node_source),
+                    "node_type": type(node).__name__,
+                    "element_name": event_name,
+                    "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source
+                }
+
+                if self._usage_passes_filters(usage_info, filters):
+                    usages.append(usage_info)
+
+        return usages
+
+    def _find_modifier_usages(self, modifier: ModifierDeclaration, direction: str, max_depth: int, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find usages of a modifier (functions using the modifier)."""
+        usages = []
+        modifier_name = getattr(modifier, 'name', '')
+
+        # Use the existing query_code method to get all functions
+        try:
+            functions_resp = self.query_code('functions')
+            if functions_resp.get('success'):
+                all_functions = functions_resp['data']['results']
+
+                for function_data in all_functions:
+                    function_modifiers = function_data.get('modifiers', [])
+                    if any(mod == modifier_name for mod in function_modifiers):
+                        usage_info = {
+                            "location": function_data.get('location', {}),
+                            "usage_type": "modifier_usage",
+                            "context": function_data.get('source_code', ''),
+                            "node_type": function_data.get('type', 'function'),
+                            "element_name": modifier_name,
+                            "source_snippet": function_data.get('source_code', '')[:200] + "..." if len(function_data.get('source_code', '')) > 200 else function_data.get('source_code', '')
+                        }
+
+                        if self._usage_passes_filters(usage_info, filters):
+                            usages.append(usage_info)
+        except Exception as e:
+            # Fallback to generic usage finding
+            usages.extend(self._find_generic_usages(modifier, direction, max_depth, filters))
+
+        return usages
+
+    def _find_generic_usages(self, element: ASTNode, direction: str, max_depth: int, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generic usage finding for other element types."""
+        usages = []
+        element_name = getattr(element, 'name', '')
+
+        # Search in all relevant nodes
+        search_nodes = self._get_search_nodes_by_direction(element, direction)
+
+        for node in search_nodes:
+            if node == element:  # Skip the element definition itself
+                continue
+
+            usage_info = self._analyze_element_usage_in_node(element, node)
+            if usage_info and self._usage_passes_filters(usage_info, filters):
+                usages.append(usage_info)
+
+                # Limit results to prevent overwhelming responses
+                if len(usages) >= 50:
+                    break
+
+        return usages
+
     def _usage_passes_filters(self, usage_info: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         """Check if usage passes the provided filters."""
         if not filters:
@@ -1265,13 +1509,19 @@ class SolidityQueryEngineV2:
         # Apply contract filter
         if "contracts" in filters:
             usage_contract = usage_info.get("location", {}).get("contract")
-            if usage_contract not in filters["contracts"]:
-                return False
+            if usage_contract:
+                contract_matches = any(self._matches_pattern(usage_contract, pattern)
+                                     for pattern in filters["contracts"])
+                if not contract_matches:
+                    return False
 
-        # Apply visibility filter
-        if "visibility" in filters:
-            # This would require more complex analysis
-            pass
+        # Apply cross-contract filter
+        if filters.get("cross_contract_only", False):
+            target_contract = filters.get("target_contract")
+            usage_contract = usage_info.get("location", {}).get("contract")
+            # Filter out references from the same contract as the target
+            if target_contract and usage_contract and target_contract == usage_contract:
+                return False
 
         # Apply file filter
         if "files" in filters:
@@ -1281,6 +1531,13 @@ class SolidityQueryEngineV2:
                                  for pattern in filters["files"])
                 if not file_matches:
                     return False
+
+        # Apply access pattern filter
+        if "access_patterns" in filters:
+            source = usage_info.get("source_snippet", "")
+            pattern_matches = any(pattern in source for pattern in filters["access_patterns"])
+            if not pattern_matches:
+                return False
 
         return True
 
@@ -1297,34 +1554,40 @@ class SolidityQueryEngineV2:
             "element_type": self._get_user_friendly_type(type(element).__name__),
             "name": element_name
         }
-        definitions.append(primary_def)
+
+        # Apply filters to primary definition
+        if self._usage_passes_filters(primary_def, _filters):
+            definitions.append(primary_def)
 
         # Look for overrides and implementations
         if isinstance(element, FunctionDeclaration):
             overrides = self._find_function_overrides(element)
             for override in overrides:
-                definitions.append({
+                override_def = {
                     "location": self._get_node_location(override),
                     "definition_type": "override",
                     "context": getattr(override, 'source_code', ''),
                     "element_type": self._get_user_friendly_type(type(override).__name__),
                     "name": getattr(override, 'name', '')
-                })
+                }
+                # Apply filters to override definitions
+                if self._usage_passes_filters(override_def, _filters):
+                    definitions.append(override_def)
 
         # Look for interface declarations
         if isinstance(element, (FunctionDeclaration, EventDeclaration)):
             interface_defs = self._find_interface_declarations(element)
             for interface_def in interface_defs:
-                definitions.append({
+                interface_def_dict = {
                     "location": self._get_node_location(interface_def),
                     "definition_type": "interface",
                     "context": getattr(interface_def, 'source_code', ''),
                     "element_type": self._get_user_friendly_type(type(interface_def).__name__),
                     "name": getattr(interface_def, 'name', '')
-                })
-
-        # Apply filters (simplified for now)
-        # TODO: implement filtering with _filters parameter
+                }
+                # Apply filters to interface definitions
+                if self._usage_passes_filters(interface_def_dict, _filters):
+                    definitions.append(interface_def_dict)
 
         return definitions
 
@@ -1425,8 +1688,16 @@ class SolidityQueryEngineV2:
             contract_name = getattr(node.parent_contract, 'name', None)
         elif isinstance(node, VariableDeclaration) and getattr(node, 'parent_contract', None):
             contract_name = getattr(node.parent_contract, 'name', None)
+        elif isinstance(node, StructDeclaration) and getattr(node, 'parent_contract', None):
+            contract_name = getattr(node.parent_contract, 'name', None)
         elif isinstance(node, ContractDeclaration):
             contract_name = getattr(node, 'name', None)
+        elif hasattr(node, 'contract') and getattr(node, 'contract', None):
+            # For CallNode and similar objects that have pre-computed contract name
+            contract_name = getattr(node, 'contract', None)
+        elif hasattr(node, 'parent_contract') and getattr(node, 'parent_contract', None):
+            # For CallNode and other nodes with direct parent_contract access
+            contract_name = getattr(node.parent_contract, 'name', None)
         elif hasattr(node, 'parent_function') and getattr(node, 'parent_function', None):
             # For ExtractedStatement and similar nodes, get contract from parent function
             parent_func = getattr(node, 'parent_function', None)
@@ -1541,24 +1812,45 @@ class SolidityQueryEngineV2:
         if isinstance(node, FunctionDeclaration):
             node_name = getattr(node, 'name', None)
             if node_name:
-                # For function scope filtering, use exact matches
-                return node_name in function_names
+                # For function scope filtering, use pattern matching or exact matching
+                # If the function name contains regex metacharacters, treat as pattern
+                # Otherwise treat as exact name
+                for func_pattern in function_names:
+                    if self._is_regex_pattern(func_pattern):
+                        if self._matches_pattern(node_name, func_pattern):
+                            return True
+                    else:
+                        if node_name == func_pattern:
+                            return True
+                return False
 
         # Special handling: for variable declarations, allow filtering by usage in matching functions
         if isinstance(node, VariableDeclaration):
             var_name = getattr(node, 'name', None)
             parent_contract = getattr(node, 'parent_contract', None)
             if var_name and parent_contract:
-                # Find functions in the same contract matching the patterns and check if they reference the variable name
+                # Find functions in the same contract matching the patterns/names and check if they reference the variable name
                 for func in getattr(parent_contract, 'functions', []) or []:
-                    for func_name in function_names:
-                        if self._matches_pattern(getattr(func, 'name', '') or '', func_name):
-                            try:
-                                src = func.get_source_code() if hasattr(func, 'get_source_code') else ''
-                            except Exception:
-                                src = ''
-                            if src and var_name in src:
-                                return True
+                    func_node_name = getattr(func, 'name', '') or ''
+                    # Check if this function matches any of the function patterns/names
+                    matches_function = False
+                    for func_pattern in function_names:
+                        if self._is_regex_pattern(func_pattern):
+                            if self._matches_pattern(func_node_name, func_pattern):
+                                matches_function = True
+                                break
+                        else:
+                            if func_node_name == func_pattern:
+                                matches_function = True
+                                break
+
+                    if matches_function:
+                        try:
+                            src = func.get_source_code() if hasattr(func, 'get_source_code') else ''
+                        except Exception:
+                            src = ''
+                        if src and var_name in src:
+                            return True
 
         return False
 
@@ -2533,6 +2825,20 @@ class SolidityQueryEngineV2:
 
     def _get_target_info(self, element: ASTNode, target_type: str) -> Dict[str, Any]:
         """Get information about the target element."""
+        # Handle synthetic elements
+        if hasattr(element, 'element_type'):
+            # This is a synthetic element
+            return {
+                "name": getattr(element, 'name', None),
+                "type": target_type,
+                "location": {
+                    "file": "synthetic",
+                    "line": 0,
+                    "column": 0,
+                    "contract": None
+                }
+            }
+
         return {
             "name": getattr(element, 'name', None),
             "type": target_type,
@@ -2575,8 +2881,8 @@ class SolidityQueryEngineV2:
 
         return context
 
-    def _get_sibling_elements(self, element: ASTNode) -> List[str]:
-        """Get sibling elements for context as simple contract::function strings."""
+    def _get_sibling_elements(self, element: ASTNode) -> List[Dict[str, Any]]:
+        """Get sibling elements for context as structured objects."""
         siblings = []
 
         # Get the contract name for this element
@@ -2597,7 +2903,20 @@ class SolidityQueryEngineV2:
                 if node_contract == element_contract:
                     node_name = getattr(node, 'name', None)
                     if node_name:
-                        siblings.append(f"{node_contract}::{node_name}")
+                        sibling_info = {
+                            "name": node_name,
+                            "type": self._get_user_friendly_type(type(node).__name__),
+                            "location": self._get_node_location(node)
+                        }
+                        # Add type-specific information
+                        if isinstance(node, FunctionDeclaration):
+                            sibling_info["visibility"] = str(node.visibility) if hasattr(node, 'visibility') else None
+                            sibling_info["signature"] = node.get_signature() if hasattr(node, 'get_signature') else None
+                        elif isinstance(node, VariableDeclaration):
+                            sibling_info["type_name"] = getattr(node, 'type_name', None)
+                            sibling_info["visibility"] = str(node.visibility) if hasattr(node, 'visibility') else None
+
+                        siblings.append(sibling_info)
 
                     # Limit to 5 siblings to avoid overwhelming output
                     if len(siblings) >= 5:
@@ -2759,6 +3078,108 @@ class SolidityQueryEngineV2:
         self._build_call_chain_recursive(element, current_chain, call_chains, visited, max_depth, 0)
 
         return call_chains
+
+    def _enhance_with_usage_patterns(self, usages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Enhance usages with usage pattern analysis."""
+        for usage in usages:
+            usage_type = usage.get("usage_type", "")
+
+            # Add pattern analysis
+            patterns = []
+            if usage_type == "assignment":
+                patterns.append("write")
+            elif usage_type in ["variable_read", "member_access", "array_access"]:
+                patterns.append("read")
+            elif usage_type == "function_call":
+                patterns.append("call")
+            elif usage_type == "event_emit":
+                patterns.append("emit")
+
+            usage["usage_patterns"] = patterns
+
+        return usages
+
+    def _enhance_with_source_context(self, usages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Enhance usages with expanded source context."""
+        for usage in usages:
+            # The context is already included, but we can expand it
+            current_context = usage.get("context", "")
+            if current_context:
+                # Add more detailed context information
+                usage["expanded_context"] = {
+                    "lines_before": 2,
+                    "lines_after": 2,
+                    "full_context": current_context,
+                    "highlighting": True
+                }
+        return usages
+
+    def _enhance_with_security_analysis(self, usages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Enhance usages with security analysis."""
+        for usage in usages:
+            security_flags = []
+
+            source = usage.get("source_snippet", "").lower()
+            element_name = usage.get("element_name", "").lower()
+
+            # Check for security-sensitive patterns
+            if "msg.sender" in source:
+                security_flags.append("uses_msg_sender")
+            if element_name in ["owner", "admin", "authority"]:
+                security_flags.append("privileged_access")
+            if "require(" in source or "assert(" in source:
+                security_flags.append("has_validation")
+            if "transfer" in element_name and "external" in source:
+                security_flags.append("external_transfer")
+
+            usage["security_analysis"] = {
+                "flags": security_flags,
+                "risk_level": "high" if len(security_flags) > 2 else "medium" if security_flags else "low"
+            }
+
+        return usages
+
+    def _create_reference_aggregation(self, references: Dict[str, Any]) -> Dict[str, Any]:
+        """Create aggregation data for references."""
+        aggregation = {
+            "by_contract": {},
+            "by_file": {},
+            "by_usage_type": {},
+            "summary": {
+                "total_usages": len(references.get("usages", [])),
+                "total_definitions": len(references.get("definitions", [])),
+                "unique_contracts": set(),
+                "unique_files": set()
+            }
+        }
+
+        # Aggregate usages
+        for usage in references.get("usages", []):
+            location = usage.get("location", {})
+            contract = location.get("contract", "unknown")
+            file_path = location.get("file", "unknown")
+            usage_type = usage.get("usage_type", "unknown")
+
+            # Count by contract
+            aggregation["by_contract"][contract] = aggregation["by_contract"].get(contract, 0) + 1
+
+            # Count by file
+            aggregation["by_file"][file_path] = aggregation["by_file"].get(file_path, 0) + 1
+
+            # Count by usage type
+            aggregation["by_usage_type"][usage_type] = aggregation["by_usage_type"].get(usage_type, 0) + 1
+
+            # Track unique contracts and files
+            if contract != "unknown":
+                aggregation["summary"]["unique_contracts"].add(contract)
+            if file_path != "unknown":
+                aggregation["summary"]["unique_files"].add(file_path)
+
+        # Convert sets to counts
+        aggregation["summary"]["unique_contracts"] = len(aggregation["summary"]["unique_contracts"])
+        aggregation["summary"]["unique_files"] = len(aggregation["summary"]["unique_files"])
+
+        return aggregation
 
     def _build_call_chain_recursive(self, current_element: ASTNode, current_chain: List[str],
                                    all_chains: List[List[str]], visited: set, max_depth: int, depth: int):

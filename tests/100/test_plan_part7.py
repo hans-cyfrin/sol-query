@@ -262,8 +262,9 @@ def test_68_mixed_element_types_batch(engine):
         print("Mixed types handled successfully")
     else:
         # Should have appropriate error message
-        assert "error" in resp or "message" in resp
-        print(f"Mixed types appropriately rejected: {resp.get('error', resp.get('message'))}")
+        assert "errors" in resp or "error" in resp or "message" in resp
+        error_msg = resp.get('errors', [resp.get('error', resp.get('message', 'Unknown error'))])[0] if resp.get('errors') else resp.get('error', resp.get('message', 'Unknown error'))
+        print(f"Mixed types appropriately rejected: {error_msg}")
 
 
 def test_69_details_with_context_enabled(engine):

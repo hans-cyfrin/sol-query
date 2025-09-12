@@ -91,11 +91,11 @@ def test_14_functions_by_name_patterns_multiple(engine):
     """
     Use Case 14: Functions by name patterns (multiple)
     - Method: query_code
-    - Params: { query_type: "functions", filters: { names: ["approve", ".*mint.*"] } }
+    - Params: { query_type: "functions", filters: { names: ["^approve$", ".*mint.*"] } }
     - Expected: names in set; verify matching on both exact and regex.
     """
-    resp = engine.query_code("functions", {"names": ["approve", ".*mint.*"]})
-    print("Functions(names=approve|.*mint.*):", json.dumps(resp, indent=2))
+    resp = engine.query_code("functions", {"names": ["^approve$", ".*mint.*"]})
+    print("Functions(names=^approve$|.*mint.*):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
     data = resp.get("data", {})
@@ -104,7 +104,7 @@ def test_14_functions_by_name_patterns_multiple(engine):
     # Validate that results match either pattern
     for result in results:
         name = result.get("name", "")
-        matches_approve = name == "approve"
+        matches_approve = re.search(r"^approve$", name)
         matches_mint = re.search(r".*mint.*", name, re.IGNORECASE)
         assert matches_approve or matches_mint, f"Function '{name}' doesn't match either pattern"
 

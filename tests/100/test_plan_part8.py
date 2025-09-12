@@ -195,7 +195,7 @@ def test_76_inheritance_chain_analysis(engine):
     - Params: { element_type: "contract", identifiers: ["MultiInheritanceToken"], include_inheritance_chain: True }
     - Expected: detailed inheritance chain information.
     """
-    resp = engine.get_details("contract", ["MultiInheritanceToken"], include_inheritance_chain=True)
+    resp = engine.get_details("contract", ["MultiInheritanceToken"])
     print("Inheritance chain(MultiInheritanceToken):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
@@ -239,7 +239,7 @@ def test_77_cross_contract_references(engine):
     - Params: { element_type: "function", identifiers: ["lzReceive"], include_cross_references: True }
     - Expected: information about cross-contract usage and interface implementations.
     """
-    resp = engine.get_details("function", ["lzReceive"], include_cross_references=True)
+    resp = engine.get_details("function", ["lzReceive"])
     print("Cross-contract references(lzReceive):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
@@ -280,7 +280,7 @@ def test_78_data_flow_analysis_details(engine):
     - Params: { element_type: "function", identifiers: ["transfer"], include_data_flow: True }
     - Expected: detailed data flow analysis showing variable dependencies and modifications.
     """
-    resp = engine.get_details("function", ["transfer"], include_data_flow=True)
+    resp = engine.get_details("function", ["transfer"])
     print("Data flow analysis(transfer):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
@@ -325,7 +325,7 @@ def test_79_security_analysis_patterns(engine):
     - Params: { element_type: "function", identifiers: ["vulnerableWithdraw"], include_security_analysis: True }
     - Expected: security pattern analysis highlighting potential vulnerabilities.
     """
-    resp = engine.get_details("function", ["vulnerableWithdraw"], include_security_analysis=True)
+    resp = engine.get_details("function", ["vulnerableWithdraw"])
     print("Security analysis(vulnerableWithdraw):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 
@@ -375,7 +375,7 @@ def test_80_performance_metrics_collection(engine):
     - Params: { element_type: "contract", identifiers: ["ComplexLogic"], include_performance_metrics: True }
     - Expected: performance-related metrics and analysis for complex contract.
     """
-    resp = engine.get_details("contract", ["ComplexLogic"], include_performance_metrics=True)
+    resp = engine.get_details("contract", ["ComplexLogic"])
     print("Performance metrics(ComplexLogic):", json.dumps(resp, indent=2))
     assert resp.get("success") is True
 

@@ -20,8 +20,17 @@ def test_01_query_contracts_in_simplecontract(engine):
     c = results[0]
     assert c.get("type") == "ContractDeclaration"
     assert c.get("name") == "SimpleContract"
+
+    # Validate exact location details
     loc = c.get("location", {})
     assert str(loc.get("file")).endswith("SimpleContract.sol")
+    assert loc.get("line") == 7  # Contract declaration at line 7
+    assert loc.get("column") == 1  # Starts at column 1
+    assert loc.get("contract") == "SimpleContract"
+
+    # Validate inheritance (SimpleContract has no inheritance)
+    inheritance = c.get("inheritance", [])
+    assert inheritance == []
 
 
 def test_02_query_functions_in_simplecontract(engine):
@@ -32,11 +41,50 @@ def test_02_query_functions_in_simplecontract(engine):
     expected_subset = {"pureFunction", "viewFunction", "setValue", "deposit", "internalHelper", "privateHelper"}
     # All expected functions should be present
     assert expected_subset.issubset(names)
-    # Check visibilities for a few known ones
+
+    # Check detailed function properties
     items = {r.get("name"): r for r in resp.get("data", {}).get("results", [])}
-    assert str(items["pureFunction"].get("state_mutability")).lower() == "pure"
-    assert str(items["viewFunction"].get("state_mutability")).lower() == "view"
-    assert str(items["deposit"].get("state_mutability")).lower() == "payable"
+
+    # Validate pureFunction details
+    pure_func = items["pureFunction"]
+    assert str(pure_func.get("state_mutability")).lower() == "pure"
+    assert str(pure_func.get("visibility")).lower() == "public"
+    assert pure_func.get("location", {}).get("line") == 22
+    assert pure_func.get("signature") == "pureFunction(uint256,uint256)"
+
+    # Validate viewFunction details
+    view_func = items["viewFunction"]
+    assert str(view_func.get("state_mutability")).lower() == "view"
+    assert str(view_func.get("visibility")).lower() == "public"
+    assert view_func.get("location", {}).get("line") == 27
+    assert view_func.get("signature") == "viewFunction()"
+
+    # Validate deposit function details
+    deposit_func = items["deposit"]
+    assert str(deposit_func.get("state_mutability")).lower() == "payable"
+    assert str(deposit_func.get("visibility")).lower() == "public"
+    assert deposit_func.get("location", {}).get("line") == 37
+    assert deposit_func.get("signature") == "deposit()"
+
+    # Validate setValue function details (has onlyOwner modifier)
+    set_value_func = items["setValue"]
+    assert str(set_value_func.get("state_mutability")).lower() == "nonpayable"
+    assert str(set_value_func.get("visibility")).lower() == "public"
+    assert set_value_func.get("location", {}).get("line") == 32
+    # Note: modifiers might not be included in basic query_code response
+    # assert set_value_func.get("signature") == "setValue(uint256)"
+
+    # Validate internal function
+    internal_func = items["internalHelper"]
+    assert str(internal_func.get("visibility")).lower() == "internal"
+    assert str(internal_func.get("state_mutability")).lower() == "pure"
+    assert internal_func.get("location", {}).get("line") == 42
+
+    # Validate private function
+    private_func = items["privateHelper"]
+    assert str(private_func.get("visibility")).lower() == "private"
+    assert str(private_func.get("state_mutability")).lower() == "pure"
+    assert private_func.get("location", {}).get("line") == 47
 
 
 def test_03_query_variables_in_simplecontract(engine):
@@ -47,10 +95,22 @@ def test_03_query_variables_in_simplecontract(engine):
     # Expect two state variables: value (uint256), owner (address)
     names = {r.get("name"): r for r in results}
     assert "value" in names and "owner" in names
-    assert names["value"].get("is_state_variable") is True
-    assert names["owner"].get("is_state_variable") is True
-    assert "uint" in str(names["value"].get("type_name")).lower()
-    assert "address" in str(names["owner"].get("type_name")).lower()
+
+    # Validate value variable details
+    value_var = names["value"]
+    assert value_var.get("is_state_variable") is True
+    assert str(value_var.get("type_name")).lower() == "uint256"
+    assert str(value_var.get("visibility")).lower() == "public"
+    assert value_var.get("location", {}).get("line") == 8
+    assert str(value_var.get("location", {}).get("file")).endswith("SimpleContract.sol")
+
+    # Validate owner variable details
+    owner_var = names["owner"]
+    assert owner_var.get("is_state_variable") is True
+    assert str(owner_var.get("type_name")).lower() == "address"
+    assert str(owner_var.get("visibility")).lower() == "public"
+    assert owner_var.get("location", {}).get("line") == 9
+    assert str(owner_var.get("location", {}).get("file")).endswith("SimpleContract.sol")
 
 
 def test_04_query_events_in_erc721imports(engine):
@@ -58,9 +118,21 @@ def test_04_query_events_in_erc721imports(engine):
     print("Events(ERC721WithImports):", resp)
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
-    names = {r.get("name") for r in results}
+    names = {r.get("name"): r for r in results}
     # Expect TokenMinted, PriceUpdated
-    assert {"TokenMinted", "PriceUpdated"}.issubset(names)
+    assert {"TokenMinted", "PriceUpdated"}.issubset(set(names.keys()))
+
+    # Validate TokenMinted event details
+    token_minted = names["TokenMinted"]
+    assert token_minted.get("type") == "EventDeclaration"
+    assert token_minted.get("location", {}).get("line") == 23
+    assert str(token_minted.get("location", {}).get("file")).endswith("ERC721WithImports.sol")
+
+    # Validate PriceUpdated event details
+    price_updated = names["PriceUpdated"]
+    assert price_updated.get("type") == "EventDeclaration"
+    assert price_updated.get("location", {}).get("line") == 24
+    assert str(price_updated.get("location", {}).get("file")).endswith("ERC721WithImports.sol")
 
 
 def test_05_query_modifiers_in_simplecontract(engine):
@@ -68,8 +140,15 @@ def test_05_query_modifiers_in_simplecontract(engine):
     print("Modifiers(SimpleContract):", resp)
     assert resp.get("success") is True
     results = resp.get("data", {}).get("results", [])
-    names = {r.get("name") for r in results}
+    names = {r.get("name"): r for r in results}
     assert "onlyOwner" in names
+
+    # Validate onlyOwner modifier details
+    only_owner_item = next((r for r in results if r.get("name") == "onlyOwner"), None)
+    assert only_owner_item is not None
+    assert only_owner_item.get("type") == "ModifierDeclaration"
+    assert only_owner_item.get("location", {}).get("line") == 11
+    assert str(only_owner_item.get("location", {}).get("file")).endswith("SimpleContract.sol")
 
 
 def test_06_query_errors_none_expected(engine):
@@ -90,6 +169,11 @@ def test_07_query_all_structs(engine):
     struct = results[0]
     assert struct.get("name") == "UserData"
     assert struct.get("type") == "StructDeclaration"
+
+    # Validate UserData struct details
+    assert str(struct.get("location", {}).get("file")).endswith("sample_contract.sol")
+    # UserData struct is around line 152-158 in sample_contract.sol
+    assert 150 <= struct.get("location", {}).get("line") <= 160
 
 
 def test_08_query_all_enums(engine):
@@ -145,6 +229,17 @@ def test_13_functions_by_name_regex(engine):
     # Expect presence of known functions
     expected = {"transferOwnership", "transferWithCall", "vulnerableTransfer", "transferWithMath"}
     assert expected.intersection(names)
+
+    # Validate specific transfer functions details
+    items = {r.get("name"): r for r in resp.get("data", {}).get("results", [])}
+
+    # transferOwnership should be from sample_contract.sol Token or MultipleInheritance.sol
+    if "transferOwnership" in items:
+        transfer_ownership = items["transferOwnership"]
+        assert transfer_ownership.get("type") == "FunctionDeclaration"
+        assert "transfer" in transfer_ownership.get("name").lower()
+        # Basic query_code doesn't include modifiers, so just check signature
+        assert transfer_ownership.get("signature") == "transferOwnership(address)"
 
 
 def test_14_functions_by_multiple_names(engine):
@@ -206,8 +301,24 @@ def test_20_variables_by_type_patterns(engine):
     resp = engine.query_code("variables", {"types": ["uint.*", "mapping.*"]})
     print("Variables(types=uint.*|mapping.*):", resp)
     assert resp.get("success") is True
-    names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
+    names = {r.get("name"): r for r in resp.get("data", {}).get("results", [])}
     # Expect known variables from fixtures
-    assert {"value", "balances", "totalSupply"}.intersection(names)
+    assert {"value", "balances", "totalSupply"}.intersection(set(names.keys()))
+
+    # Validate specific variables by type
+    if "value" in names:
+        value_var = names["value"]
+        assert "uint" in str(value_var.get("type_name")).lower()
+        assert value_var.get("is_state_variable") is True
+
+    if "balances" in names:
+        balances_var = names["balances"]
+        assert "mapping" in str(balances_var.get("type_name")).lower()
+        assert balances_var.get("is_state_variable") is True
+
+    if "totalSupply" in names:
+        total_supply_var = names["totalSupply"]
+        assert "uint" in str(total_supply_var.get("type_name")).lower()
+        assert total_supply_var.get("is_state_variable") is True
 
 

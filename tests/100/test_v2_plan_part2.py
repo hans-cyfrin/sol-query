@@ -2,8 +2,23 @@ def test_21_state_variables_only(engine):
     resp = engine.query_code("variables", {"is_state_variable": True}, {"files": [".*SimpleContract.sol"]})
     print("Variables(state only, SimpleContract):", resp)
     assert resp.get("success") is True
-    names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
+    results = resp.get("data", {}).get("results", [])
+    names = {r.get("name") for r in results}
     assert names == {"value", "owner"}
+
+    # Validate detailed state variable properties
+    value_var = next((r for r in results if r.get("name") == "value"), None)
+    owner_var = next((r for r in results if r.get("name") == "owner"), None)
+
+    assert value_var is not None
+    assert value_var.get("is_state_variable") is True
+    assert str(value_var.get("type_name")).lower() == "uint256"
+    assert value_var.get("location", {}).get("line") == 8
+
+    assert owner_var is not None
+    assert owner_var.get("is_state_variable") is True
+    assert str(owner_var.get("type_name")).lower() == "address"
+    assert owner_var.get("location", {}).get("line") == 9
 
 
 def test_22_statements_by_type(engine):
@@ -25,16 +40,36 @@ def test_24_functions_that_change_state(engine):
     resp = engine.query_code("functions", {"changes_state": True}, {"files": [".*SimpleContract.sol"]})
     print("Functions(change state, SimpleContract):", resp)
     assert resp.get("success") is True
-    names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
+    results = resp.get("data", {}).get("results", [])
+    names = {r.get("name") for r in results}
     assert "setValue" in names
+
+    # Validate setValue function as a state-changing function
+    set_value_func = next((r for r in results if r.get("name") == "setValue"), None)
+    assert set_value_func is not None
+    assert set_value_func.get("type") == "FunctionDeclaration"
+    assert str(set_value_func.get("visibility")).lower() == "public"
+    assert str(set_value_func.get("state_mutability")).lower() == "nonpayable"
+    assert set_value_func.get("location", {}).get("line") == 32
+    assert str(set_value_func.get("location", {}).get("file")).endswith("SimpleContract.sol")
 
 
 def test_25_functions_with_external_calls(engine):
     resp = engine.query_code("functions", {"has_external_calls": True})
     print("Functions(has external calls):", resp)
     assert resp.get("success") is True
-    names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
+    results = resp.get("data", {}).get("results", [])
+    names = {r.get("name") for r in results}
     assert {"transferWithCall", "vulnerableTransfer"}.intersection(names)
+
+    # Validate transferWithCall function has external calls
+    if any(r.get("name") == "transferWithCall" for r in results):
+        transfer_func = next((r for r in results if r.get("name") == "transferWithCall"), None)
+        assert transfer_func is not None
+        assert transfer_func.get("type") == "FunctionDeclaration"
+        assert str(transfer_func.get("visibility")).lower() in ["external", "public"]
+        # Should be from MultipleInheritance.sol
+        assert str(transfer_func.get("location", {}).get("file")).endswith("MultipleInheritance.sol")
 
 
 def test_26_functions_with_asset_transfers(engine):
@@ -49,8 +84,24 @@ def test_27_payable_functions(engine):
     resp = engine.query_code("functions", {"is_payable": True})
     print("Functions(payable):", resp)
     assert resp.get("success") is True
-    names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
+    results = resp.get("data", {}).get("results", [])
+    names = {r.get("name") for r in results}
     assert {"deposit", "mint"}.intersection(names)
+
+    # Validate payable functions
+    payable_functions = {r.get("name"): r for r in results}
+
+    if "deposit" in payable_functions:
+        deposit_func = payable_functions["deposit"]
+        assert str(deposit_func.get("state_mutability")).lower() == "payable"
+        assert str(deposit_func.get("location", {}).get("file")).endswith("SimpleContract.sol")
+        assert deposit_func.get("location", {}).get("line") == 37
+
+    if "mint" in payable_functions:
+        mint_func = payable_functions["mint"]
+        assert str(mint_func.get("state_mutability")).lower() == "payable"
+        # mint should be from ERC721WithImports.sol
+        assert str(mint_func.get("location", {}).get("file")).endswith("ERC721WithImports.sol")
 
 
 def test_28_calls_filtered_by_call_types(engine):
@@ -82,8 +133,18 @@ def test_31_scope_contracts(engine):
     resp = engine.query_code("functions", {}, {"contracts": [".*MultiInheritanceToken"]})
     print("Functions(scope contracts=MultiInheritanceToken):", resp)
     assert resp.get("success") is True
-    names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
+    results = resp.get("data", {}).get("results", [])
+    names = {r.get("name") for r in results}
     assert {"mint", "transferWithCall"}.issubset(names)
+
+    # Validate functions are specifically from MultiInheritanceToken contract
+    for result in results:
+        # All results should be from MultipleInheritance.sol file
+        assert str(result.get("location", {}).get("file")).endswith("MultipleInheritance.sol")
+        # Contract context should be MultiInheritanceToken (where available)
+        location_contract = result.get("location", {}).get("contract")
+        if location_contract:  # Some elements might not have contract populated
+            assert location_contract == "MultiInheritanceToken"
 
 
 def test_32_scope_functions(engine):
@@ -91,8 +152,22 @@ def test_32_scope_functions(engine):
     print("Variables(scope functions=.*mint.*):", resp)
     assert resp.get("success") is True
     # Variables used in mint functions include balances/price/nextTokenId
-    names = {r.get("name") for r in resp.get("data", {}).get("results", [])}
+    results = resp.get("data", {}).get("results", [])
+    names = {r.get("name") for r in results}
     assert {"balances", "price", "nextTokenId"}.intersection(names)
+
+    # Validate specific variables used in mint functions
+    var_dict = {r.get("name"): r for r in results}
+
+    if "price" in var_dict:
+        price_var = var_dict["price"]
+        assert str(price_var.get("type_name")).lower() == "uint256"
+        assert str(price_var.get("location", {}).get("file")).endswith("ERC721WithImports.sol")
+
+    if "nextTokenId" in var_dict:
+        next_token_var = var_dict["nextTokenId"]
+        assert str(next_token_var.get("type_name")).lower() == "uint256"
+        assert str(next_token_var.get("location", {}).get("file")).endswith("ERC721WithImports.sol")
 
 
 def test_33_scope_files(engine):

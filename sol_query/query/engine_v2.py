@@ -21,6 +21,7 @@ from sol_query.models.source_location import SourceLocation
 from sol_query.utils.pattern_matching import PatternMatcher
 from sol_query.analysis.call_analyzer import CallAnalyzer
 from sol_query.analysis.variable_tracker import VariableTracker
+from sol_query.utils.serialization import serialize_enum_value
 
 
 class SolidityQueryEngineV2:
@@ -897,8 +898,8 @@ class SolidityQueryEngineV2:
             # Add basic node-specific info
             if isinstance(node, FunctionDeclaration):
                 result_item.update({
-                    "visibility": getattr(node, 'visibility', None).value if hasattr(getattr(node, 'visibility', None), 'value') else (str(getattr(node, 'visibility', '')) or None),
-                    "state_mutability": getattr(node, 'state_mutability', None).value if hasattr(getattr(node, 'state_mutability', None), 'value') else (str(getattr(node, 'state_mutability', '')) or None),
+                    "visibility": serialize_enum_value(getattr(node, 'visibility', None)),
+                    "state_mutability": serialize_enum_value(getattr(node, 'state_mutability', None)),
                     "signature": node.get_signature() if hasattr(node, 'get_signature') else None
                 })
             elif isinstance(node, ContractDeclaration):
@@ -909,7 +910,7 @@ class SolidityQueryEngineV2:
             elif isinstance(node, VariableDeclaration):
                 result_item.update({
                     "type_name": str(getattr(node, 'type_name', '')),
-                    "visibility": getattr(node, 'visibility', None).value if hasattr(getattr(node, 'visibility', None), 'value') else (str(getattr(node, 'visibility', '')) or None),
+                    "visibility": serialize_enum_value(getattr(node, 'visibility', None)),
                     "is_state_variable": (node.is_state_variable() if hasattr(node, 'is_state_variable') and callable(getattr(node, 'is_state_variable')) else (getattr(node, 'visibility', None) is not None))
                 })
 
@@ -1113,7 +1114,7 @@ class SolidityQueryEngineV2:
         # Add type-specific information to basic_info
         if isinstance(element, VariableDeclaration):
             basic_info["type_name"] = getattr(element, 'type_name', None)
-            basic_info["visibility"] = str(element.visibility) if hasattr(element, 'visibility') else None
+            basic_info["visibility"] = serialize_enum_value(getattr(element, 'visibility', None))
 
         return basic_info
 
@@ -1125,8 +1126,8 @@ class SolidityQueryEngineV2:
             info["source_code"] = element.get_source_code() if hasattr(element, 'get_source_code') else None
 
         if isinstance(element, FunctionDeclaration):
-            info["visibility"] = str(element.visibility) if hasattr(element, 'visibility') else None
-            info["state_mutability"] = str(element.state_mutability) if hasattr(element, 'state_mutability') else None
+            info["visibility"] = serialize_enum_value(getattr(element, 'visibility', None))
+            info["state_mutability"] = serialize_enum_value(getattr(element, 'state_mutability', None))
             info["modifiers"] = element.modifiers if hasattr(element, 'modifiers') else []
             # Include calls in detailed analysis
             info["calls"] = self._get_node_calls(element)
@@ -1134,7 +1135,7 @@ class SolidityQueryEngineV2:
         elif isinstance(element, ContractDeclaration):
             # Add contract-specific detailed information
             info["inheritance"] = element.inheritance if hasattr(element, 'inheritance') else []
-            info["functions"] = [{"name": f.name, "visibility": str(f.visibility) if hasattr(f, 'visibility') else None}
+            info["functions"] = [{"name": f.name, "visibility": serialize_enum_value(getattr(f, 'visibility', None))}
                                for f in element.functions] if hasattr(element, 'functions') else []
             info["variables"] = [{"name": v.name, "type": getattr(v, 'type_name', None)}
                                for v in element.variables] if hasattr(element, 'variables') else []
@@ -2910,11 +2911,11 @@ class SolidityQueryEngineV2:
                         }
                         # Add type-specific information
                         if isinstance(node, FunctionDeclaration):
-                            sibling_info["visibility"] = str(node.visibility) if hasattr(node, 'visibility') else None
+                            sibling_info["visibility"] = serialize_enum_value(getattr(node, 'visibility', None))
                             sibling_info["signature"] = node.get_signature() if hasattr(node, 'get_signature') else None
                         elif isinstance(node, VariableDeclaration):
                             sibling_info["type_name"] = getattr(node, 'type_name', None)
-                            sibling_info["visibility"] = str(node.visibility) if hasattr(node, 'visibility') else None
+                            sibling_info["visibility"] = serialize_enum_value(getattr(node, 'visibility', None))
 
                         siblings.append(sibling_info)
 

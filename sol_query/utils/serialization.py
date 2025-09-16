@@ -12,6 +12,23 @@ from sol_query.core.ast_nodes import ASTNode, ContractDeclaration, FunctionDecla
 from sol_query.query.collections import BaseCollection
 
 
+def serialize_enum_value(enum_obj):
+    """
+    Utility function to safely serialize enum values to strings.
+    
+    Args:
+        enum_obj: The enum object to serialize
+        
+    Returns:
+        str: The enum's string value if it's a proper enum, otherwise string representation or None
+    """
+    if enum_obj is None:
+        return None
+    if hasattr(enum_obj, 'value'):
+        return enum_obj.value
+    return str(enum_obj) if enum_obj else None
+
+
 class SerializationLevel(str, Enum):
     """Levels of detail for serialization."""
     SUMMARY = "summary"      # Basic info only

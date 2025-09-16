@@ -40,8 +40,8 @@ def test_62_function_calls_and_modifiers(engine):
 
     # Validate detailed_info content against ERC721WithImports.sol
     di = el["detailed_info"]
-    assert str(di.get("visibility")) == "Visibility.EXTERNAL"
-    assert str(di.get("state_mutability")) == "StateMutability.PAYABLE"
+    assert di.get("visibility") == "external"
+    assert di.get("state_mutability") == "payable"
 
     # Check modifiers - mint function has nonReentrant modifier
     modifiers = di.get("modifiers", [])

@@ -1,6 +1,6 @@
 [project]
 name = "sol-query"
-version = "0.1.0"
+version = "2.0.0"
 description = "A comprehensive Python-based code query engine for Solidity"
 readme = "README.md"
 requires-python = ">=3.10"

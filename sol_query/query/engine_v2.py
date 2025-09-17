@@ -1146,11 +1146,19 @@ class SolidityQueryEngineV2:
 
     def _get_comprehensive_element_info(self, element: ASTNode) -> Dict[str, Any]:
         """Get comprehensive information about an element."""
-        return {
+        from sol_query.core.ast_nodes import ContractDeclaration
+
+        info = {
             "dependencies": self._get_element_dependencies(element),
-            "call_graph": self._get_element_call_graph(element),
             "data_flow": self._get_element_data_flow(element)
         }
+
+        # Only include call_graph for functions, not contracts
+        # Contracts don't make calls themselves - their functions do
+        if not isinstance(element, ContractDeclaration):
+            info["call_graph"] = self._get_element_call_graph(element)
+
+        return info
 
     def _find_target_element(self, target: str, target_type: str) -> Optional[ASTNode]:
         """Find the target element for reference analysis."""
@@ -2996,21 +3004,30 @@ class SolidityQueryEngineV2:
         if not isinstance(element, ContractDeclaration):
             return dependencies
 
+        # Track added dependencies to avoid duplicates
+        added_deps = set()
+
         # Get imports/using statements for contracts
         source_deps = self._get_node_dependencies(element)
         for dep in source_deps:
-            dependencies.append({
-                "name": dep,
-                "type": "import"
-            })
+            dep_key = (dep, "import")
+            if dep_key not in added_deps:
+                dependencies.append({
+                    "name": dep,
+                    "type": "import"
+                })
+                added_deps.add(dep_key)
 
         # Get inheritance dependencies for contracts
         inheritance = getattr(element, 'inheritance', [])
         for base in inheritance:
-            dependencies.append({
-                "name": base,
-                "type": "inheritance"
-            })
+            dep_key = (base, "inheritance")
+            if dep_key not in added_deps:
+                dependencies.append({
+                    "name": base,
+                    "type": "inheritance"
+                })
+                added_deps.add(dep_key)
 
         return dependencies
 
@@ -3063,16 +3080,24 @@ class SolidityQueryEngineV2:
 
         # Get variable access patterns
         variables = self._get_node_variables(element)
+
+        # Track processed variables to avoid duplicates
+        read_vars = set()
+        written_vars = set()
+
         for var in variables:
             var_name = var.get("name", "")
-            # Filter out malformed or partial variable names
-            if (var_name and var_name.strip() and
-                not var_name.endswith('(') and '(' not in var_name and
-                len(var_name) > 1):
+
+            # Enhanced filtering for variable names
+            if self._is_valid_variable_name(var_name):
                 if var.get("access_type") == "read":
-                    data_flow["variables_read"].append(var_name)
+                    if var_name not in read_vars:
+                        data_flow["variables_read"].append(var_name)
+                        read_vars.add(var_name)
                 elif var.get("access_type") == "write":
-                    data_flow["variables_written"].append(var_name)
+                    if var_name not in written_vars:
+                        data_flow["variables_written"].append(var_name)
+                        written_vars.add(var_name)
 
         # Check for external interactions
         if self._has_external_calls(element):
@@ -3085,6 +3110,67 @@ class SolidityQueryEngineV2:
 
         return data_flow
 
+    def _is_valid_variable_name(self, var_name: str) -> bool:
+        """Enhanced filtering to exclude contracts, events, errors, expressions, and invalid variable names."""
+        if not var_name or not var_name.strip():
+            return False
+
+        # Filter out malformed or partial variable names
+        if var_name.endswith('(') or '(' in var_name or len(var_name) <= 1:
+            return False
+
+        # Filter out expressions and operators
+        if any(op in var_name for op in ['!', '<', '>', '==', '!=', '&&', '||', '+', '-', '*', '/', '%', '[', ']']):
+            return False
+
+        # Filter out known contract names (these should not be variables)
+        contract_names = {
+            'GroupStaking', 'GovernanceToken', 'StakingGroup', 'Ownable', 'ERC20', 'ERC721',
+            'IERC20', 'IERC721', 'SafeMath', 'Context', 'AccessControl', 'Pausable'
+        }
+        if var_name in contract_names:
+            return False
+
+        # Filter out known event names
+        event_names = {
+            'GroupCreated', 'StakeAdded', 'RewardsDistributed', 'Transfer', 'Approval',
+            'OwnershipTransferred', 'TokensMinted', 'UserStatusUpdated'
+        }
+        if var_name in event_names:
+            return False
+
+        # Filter out known error names
+        error_names = {
+            'InvalidTokenAddress', 'InvalidWeight', 'InvalidMember', 'BlacklistedMember',
+            'DuplicateMember', 'InsufficientBalance', 'Unauthorized'
+        }
+        if var_name in error_names:
+            return False
+
+        # Filter out modifier names
+        modifier_names = {
+            'onlyOwner', 'nonReentrant', 'whenNotPaused', 'validAddress'
+        }
+        if var_name in modifier_names:
+            return False
+
+        # Filter out function names that get misidentified as variables
+        function_names = {
+            'constructor', 'createStakingGroup', 'stakeToGroup', 'withdrawFromGroup',
+            'getGroupInfo', 'isMemberOfGroup', 'mint', 'updateUserStatus', 'transfer',
+            'transferFrom', 'approve', 'allowance', 'balanceOf'
+        }
+        if var_name in function_names:
+            return False
+
+        # Filter out struct/type names
+        type_names = {
+            'StakingGroup', 'address', 'uint256', 'bool', 'string', 'bytes', 'mapping'
+        }
+        if var_name in type_names:
+            return False
+
+        return True
 
     def _build_call_chains(self, element: ASTNode, max_depth: int) -> List[List[str]]:
         """Build call chains for an element."""

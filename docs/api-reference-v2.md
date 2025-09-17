@@ -305,9 +305,12 @@ Analysis options:
 | Option | Type | Description | Default |
 |--------|------|-------------|---------|
 | `include_source` | `bool` | Include source code | `True` |
-| `show_call_chains` | `bool` | Show call relationship chains | `False` |
+| `show_call_chains` | `bool` | Show call relationship chains (expensive) | `False` |
 | `max_context_lines` | `int` | Lines of context to include | `5` |
 | `include_signatures` | `bool` | Include function signatures | `True` |
+| `include_natspec` | `bool` | Include NatSpec documentation | `True` |
+| `include_modifiers` | `bool` | Include modifier information | `True` |
+| `resolve_inheritance` | `bool` | Resolve inherited elements | `False` |
 
 #### Return Value
 

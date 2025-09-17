@@ -97,15 +97,15 @@ result = engine.query_code("functions", {
 })
 
 # Detailed analysis
-details = engine.get_details("function", ["transfer", "withdraw"], 
-                            analysis_depth="comprehensive")
+details = engine.get_details("function", ["transfer", "withdraw"],
+                            options={"show_call_chains": True, "include_source": True})
 
 # Reference tracking
-refs = engine.find_references("totalSupply", "variable", 
+refs = engine.find_references("totalSupply", "variable",
                              reference_type="all")
 ```
 
-#### V1 Traditional/Fluent API 
+#### V1 Traditional/Fluent API
 ```python
 from sol_query import SolidityQueryEngine
 
@@ -266,7 +266,7 @@ All major features include working code examples in the API reference.
 ### Common Patterns
 The API reference includes sections on:
 - Query composition techniques
-- Pattern matching strategies  
+- Pattern matching strategies
 - Data flow analysis workflows
 - Import dependency analysis
 - Performance optimization
@@ -287,7 +287,7 @@ Sol-Query provides comprehensive error handling:
 # Universal query - any Solidity construct
 result = engine.query_code(query_type, filters, scope, include, options)
 
-# Detailed analysis - multiple depth levels  
+# Detailed analysis - multiple depth levels
 details = engine.get_details(element_type, identifiers, analysis_depth)
 
 # Reference tracking - find relationships
@@ -312,7 +312,7 @@ flow_paths = engine.trace_variable_flow("balance", "transfer")
 ```python
 # V2: Reentrancy detection
 engine.query_code("functions", {
-    "has_external_calls": True, 
+    "has_external_calls": True,
     "changes_state": True
 })
 

@@ -442,6 +442,16 @@ class TestFindReferencesBattleLevel:
                 assert "location" in usage
                 assert "usage_type" in usage
                 assert "context" in usage
+                assert "line_content" in usage, "Usage should have line_content field"
+
+                # Assert line_content is a string and not empty if location is valid
+                line_content = usage["line_content"]
+                assert isinstance(line_content, str), f"line_content should be string, got {type(line_content)}"
+
+                # If we have a valid location, line_content should not be empty
+                location = usage["location"]
+                if location.get("line") and location.get("file"):
+                    assert line_content.strip(), "line_content should not be empty for valid locations"
 
     def test_variable_reference_tracking(self, loaded_engine):
         """Test variable reference tracking."""
@@ -456,6 +466,23 @@ class TestFindReferencesBattleLevel:
         references = result["data"]["references"]
         assert "usages" in references
         assert "definitions" in references
+
+        # Test usages have line_content
+        for usage in references["usages"]:
+            assert "line_content" in usage, "Variable usage should have line_content field"
+            assert isinstance(usage["line_content"], str), "line_content should be string"
+            if usage["location"].get("line") and usage["location"].get("file"):
+                assert usage["line_content"].strip(), "line_content should not be empty for valid locations"
+
+        # Test definitions have line_content
+        for definition in references["definitions"]:
+            assert "line_content" in definition, "Variable definition should have line_content field"
+            assert isinstance(definition["line_content"], str), "line_content should be string"
+            if definition["location"].get("line") and definition["location"].get("file"):
+                assert definition["line_content"].strip(), "line_content should not be empty for valid locations"
+                # For variable definitions, line_content should contain the variable name
+                if definition.get("name"):
+                    assert definition["name"] in definition["line_content"], f"Variable '{definition['name']}' should appear in line_content: '{definition['line_content']}'"
 
     def test_cross_contract_references(self, loaded_engine):
         """Test cross-contract reference analysis."""
@@ -893,6 +920,15 @@ class TestResponseFormatConsistency:
             references = data["references"]
             assert "usages" in references
             assert "definitions" in references
+
+            # Test that usages and definitions have line_content
+            for usage in references["usages"]:
+                assert "line_content" in usage, "All usages should have line_content field"
+                assert isinstance(usage["line_content"], str), "line_content should be string"
+
+            for definition in references["definitions"]:
+                assert "line_content" in definition, "All definitions should have line_content field"
+                assert isinstance(definition["line_content"], str), "line_content should be string"
 
     def test_error_response_format_consistency(self, loaded_engine):
         """Test error response format consistency."""

@@ -376,7 +376,9 @@ class TestSolidityQueryEngineV2API:
         mock_function.name = "withdraw"
         mock_find_target.return_value = mock_function
 
-        with patch.object(engine, '_find_element_references', return_value={"usages": [], "definitions": []}):
+        mock_usages = [{"location": {"file": "test.sol", "line": 10}, "usage_type": "call", "line_content": "withdraw(amount);"}]
+        mock_definitions = [{"location": {"file": "test.sol", "line": 5}, "definition_type": "primary", "line_content": "function withdraw(uint256 amount) public {"}]
+        with patch.object(engine, '_find_element_references', return_value={"usages": mock_usages, "definitions": mock_definitions}):
             result = engine.find_references("withdraw", "function",
                 reference_type="usages",
                 direction="backward",
@@ -387,6 +389,12 @@ class TestSolidityQueryEngineV2API:
         assert result["query_info"]["parameters"]["reference_type"] == "usages"
         assert result["query_info"]["parameters"]["direction"] == "backward"
 
+        # Validate line_content is included in usages
+        usages = result["data"]["references"]["usages"]
+        assert len(usages) > 0, "Should have mocked usages"
+        assert "line_content" in usages[0], "Usage should have line_content field"
+        assert usages[0]["line_content"] == "withdraw(amount);", "line_content should match mocked value"
+
     @patch('sol_query.query.engine_v2.SolidityQueryEngineV2._find_target_element')
     def test_find_references_variable(self, mock_find_target, engine):
         """Test find_references for variables."""
@@ -394,7 +402,9 @@ class TestSolidityQueryEngineV2API:
         mock_variable.name = "totalSupply"
         mock_find_target.return_value = mock_variable
 
-        with patch.object(engine, '_find_element_references', return_value={"usages": [], "definitions": []}):
+        mock_usages = [{"location": {"file": "token.sol", "line": 25}, "usage_type": "read", "line_content": "return totalSupply;"}]
+        mock_definitions = [{"location": {"file": "token.sol", "line": 8}, "definition_type": "primary", "line_content": "uint256 private totalSupply;"}]
+        with patch.object(engine, '_find_element_references', return_value={"usages": mock_usages, "definitions": mock_definitions}):
             result = engine.find_references("totalSupply", "variable",
                 reference_type="usages",
                 direction="forward",
@@ -404,6 +414,12 @@ class TestSolidityQueryEngineV2API:
         assert result["query_info"]["parameters"]["target"] == "totalSupply"
         assert result["query_info"]["parameters"]["target_type"] == "variable"
 
+        # Validate line_content is included in variable usages
+        usages = result["data"]["references"]["usages"]
+        assert len(usages) > 0, "Should have mocked variable usages"
+        assert "line_content" in usages[0], "Variable usage should have line_content field"
+        assert usages[0]["line_content"] == "return totalSupply;", "line_content should match mocked value"
+
     @patch('sol_query.query.engine_v2.SolidityQueryEngineV2._find_target_element')
     def test_find_references_all_types(self, mock_find_target, engine):
         """Test find_references with all reference types."""
@@ -411,7 +427,9 @@ class TestSolidityQueryEngineV2API:
         mock_function.name = "transfer"
         mock_find_target.return_value = mock_function
 
-        with patch.object(engine, '_find_element_references', return_value={"usages": [], "definitions": []}):
+        mock_usages = [{"location": {"file": "contract.sol", "line": 42}, "usage_type": "call", "line_content": "transfer(to, amount);"}]
+        mock_definitions = [{"location": {"file": "contract.sol", "line": 15}, "definition_type": "primary", "line_content": "function transfer(address to, uint256 amount) public returns (bool) {"}]
+        with patch.object(engine, '_find_element_references', return_value={"usages": mock_usages, "definitions": mock_definitions}):
             result = engine.find_references("transfer", "function",
                 reference_type="all",
                 direction="both")
@@ -419,6 +437,19 @@ class TestSolidityQueryEngineV2API:
         assert result["success"] is True
         assert result["query_info"]["parameters"]["reference_type"] == "all"
         assert result["query_info"]["parameters"]["direction"] == "both"
+
+        # Validate line_content is included in both usages and definitions
+        references = result["data"]["references"]
+        usages = references["usages"]
+        definitions = references["definitions"]
+
+        assert len(usages) > 0, "Should have mocked usages"
+        assert "line_content" in usages[0], "Usage should have line_content field"
+        assert usages[0]["line_content"] == "transfer(to, amount);", "Usage line_content should match mocked value"
+
+        assert len(definitions) > 0, "Should have mocked definitions"
+        assert "line_content" in definitions[0], "Definition should have line_content field"
+        assert definitions[0]["line_content"] == "function transfer(address to, uint256 amount) public returns (bool) {", "Definition line_content should match mocked value"
 
     def test_find_references_parameter_validation(self, engine):
         """Test parameter validation for find_references."""

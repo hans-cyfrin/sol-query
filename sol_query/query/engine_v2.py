@@ -1207,6 +1207,31 @@ class SolidityQueryEngineV2:
 
         return SyntheticElement(target, target_type)
 
+    def _get_full_line_content(self, location_info: Dict[str, Any]) -> str:
+        """Extract the full line content from source file at the given location."""
+        try:
+            file_path = location_info.get('file')
+            line_number = location_info.get('line', 0)
+
+            if not file_path or not line_number:
+                return ""
+
+            # Try to get the source file from source manager
+            source_file = None
+            for sf in self.source_manager.get_all_files():
+                if str(sf.path) == file_path or sf.path.name == file_path:
+                    source_file = sf
+                    break
+
+            if source_file and source_file.content:
+                lines = source_file.content.splitlines()
+                if 1 <= line_number <= len(lines):
+                    return lines[line_number - 1].strip()  # Convert to 0-indexed and strip whitespace
+
+            return ""
+        except Exception:
+            return ""
+
     def _find_element_references(self, target_element: ASTNode,
                                reference_type: str, direction: str,
                                max_depth: int, filters: Dict[str, Any],
@@ -1325,13 +1350,15 @@ class SolidityQueryEngineV2:
         # Get context around the usage
         context = self._extract_usage_context(element_name, node_source)
 
+        location_data = self._get_node_location(node)
         return {
-            "location": self._get_node_location(node),
+            "location": location_data,
             "usage_type": usage_type,
             "context": context,
             "node_type": type(node).__name__,
             "element_name": element_name,
-            "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source
+            "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source,
+            "line_content": self._get_full_line_content(location_data)
         }
 
     def _determine_usage_type(self, element: ASTNode, element_name: str, source: str) -> str:
@@ -1384,13 +1411,15 @@ class SolidityQueryEngineV2:
                         (call_name.startswith('_') and call_name[1:] == function_name) or
                         (function_name.startswith('_') and function_name[1:] == call_name)):
 
+                        location_data = call_data.get('location', {})
                         usage_info = {
-                            "location": call_data.get('location', {}),
+                            "location": location_data,
                             "usage_type": "function_call",
                             "context": call_data.get('source_code', ''),
                             "node_type": call_data.get('type', 'call'),
                             "element_name": call_name,
-                            "source_snippet": call_data.get('source_code', '')[:200] + "..." if len(call_data.get('source_code', '')) > 200 else call_data.get('source_code', '')
+                            "source_snippet": call_data.get('source_code', '')[:200] + "..." if len(call_data.get('source_code', '')) > 200 else call_data.get('source_code', ''),
+                            "line_content": self._get_full_line_content(location_data)
                         }
 
                         if self._usage_passes_filters(usage_info, filters):
@@ -1446,13 +1475,15 @@ class SolidityQueryEngineV2:
             elif f"{variable_name}.push(" in node_source:
                 usage_type = "array_push"
 
+            location_data = self._get_node_location(node)
             usage_info = {
-                "location": self._get_node_location(node),
+                "location": location_data,
                 "usage_type": usage_type,
                 "context": self._extract_usage_context(variable_name, node_source),
                 "node_type": type(node).__name__,
                 "element_name": variable_name,
-                "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source
+                "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source,
+                "line_content": self._get_full_line_content(location_data)
             }
 
             if self._usage_passes_filters(usage_info, filters):
@@ -1471,13 +1502,15 @@ class SolidityQueryEngineV2:
         for node in all_nodes:
             node_source = getattr(node, 'source_code', '')
             if f"emit {event_name}" in node_source:
+                location_data = self._get_node_location(node)
                 usage_info = {
-                    "location": self._get_node_location(node),
+                    "location": location_data,
                     "usage_type": "event_emit",
                     "context": self._extract_usage_context(event_name, node_source),
                     "node_type": type(node).__name__,
                     "element_name": event_name,
-                    "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source
+                    "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source,
+                    "line_content": self._get_full_line_content(location_data)
                 }
 
                 if self._usage_passes_filters(usage_info, filters):
@@ -1499,13 +1532,15 @@ class SolidityQueryEngineV2:
                 for function_data in all_functions:
                     function_modifiers = function_data.get('modifiers', [])
                     if any(mod == modifier_name for mod in function_modifiers):
+                        location_data = function_data.get('location', {})
                         usage_info = {
-                            "location": function_data.get('location', {}),
+                            "location": location_data,
                             "usage_type": "modifier_usage",
                             "context": function_data.get('source_code', ''),
                             "node_type": function_data.get('type', 'function'),
                             "element_name": modifier_name,
-                            "source_snippet": function_data.get('source_code', '')[:200] + "..." if len(function_data.get('source_code', '')) > 200 else function_data.get('source_code', '')
+                            "source_snippet": function_data.get('source_code', '')[:200] + "..." if len(function_data.get('source_code', '')) > 200 else function_data.get('source_code', ''),
+                            "line_content": self._get_full_line_content(location_data)
                         }
 
                         if self._usage_passes_filters(usage_info, filters):
@@ -1584,12 +1619,14 @@ class SolidityQueryEngineV2:
         element_name = getattr(element, 'name', '')
 
         # Primary definition (the element itself)
+        location_data = self._get_node_location(element)
         primary_def = {
-            "location": self._get_node_location(element),
+            "location": location_data,
             "definition_type": "primary",
             "context": getattr(element, 'source_code', ''),
             "element_type": self._get_user_friendly_type(type(element).__name__),
-            "name": element_name
+            "name": element_name,
+            "line_content": self._get_full_line_content(location_data)
         }
 
         # Apply filters to primary definition
@@ -1600,12 +1637,14 @@ class SolidityQueryEngineV2:
         if isinstance(element, FunctionDeclaration):
             overrides = self._find_function_overrides(element)
             for override in overrides:
+                override_location = self._get_node_location(override)
                 override_def = {
-                    "location": self._get_node_location(override),
+                    "location": override_location,
                     "definition_type": "override",
                     "context": getattr(override, 'source_code', ''),
                     "element_type": self._get_user_friendly_type(type(override).__name__),
-                    "name": getattr(override, 'name', '')
+                    "name": getattr(override, 'name', ''),
+                    "line_content": self._get_full_line_content(override_location)
                 }
                 # Apply filters to override definitions
                 if self._usage_passes_filters(override_def, _filters):
@@ -1615,12 +1654,14 @@ class SolidityQueryEngineV2:
         if isinstance(element, (FunctionDeclaration, EventDeclaration)):
             interface_defs = self._find_interface_declarations(element)
             for interface_def in interface_defs:
+                interface_location = self._get_node_location(interface_def)
                 interface_def_dict = {
-                    "location": self._get_node_location(interface_def),
+                    "location": interface_location,
                     "definition_type": "interface",
                     "context": getattr(interface_def, 'source_code', ''),
                     "element_type": self._get_user_friendly_type(type(interface_def).__name__),
-                    "name": getattr(interface_def, 'name', '')
+                    "name": getattr(interface_def, 'name', ''),
+                    "line_content": self._get_full_line_content(interface_location)
                 }
                 # Apply filters to interface definitions
                 if self._usage_passes_filters(interface_def_dict, _filters):

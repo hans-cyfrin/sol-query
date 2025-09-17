@@ -507,7 +507,8 @@ Analysis options:
                     "usage_type": str,   # "function_call", "variable_read", etc.
                     "context": str,      # Source code context
                     "node_type": str,    # AST node type
-                    "source_snippet": str
+                    "source_snippet": str,
+                    "line_content": str  # Full line content at the location
                 }
             ],
             "definitions": [             # Definition sites
@@ -515,7 +516,8 @@ Analysis options:
                     "location": {...},
                     "definition_type": str, # "primary", "override", "interface"
                     "context": str,
-                    "element_type": str
+                    "element_type": str,
+                    "line_content": str  # Full line content at the location
                 }
             ],
             "call_chains": [             # If show_call_chains=True

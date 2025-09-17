@@ -21,6 +21,7 @@ def test_86_find_references_function_all(engine):
         assert transfer_def.get("name") == "transfer", f"Expected name 'transfer', got '{transfer_def.get('name')}'"
         assert transfer_def.get("element_type") == "function", f"Expected element_type 'function', got '{transfer_def.get('element_type')}'"
         assert "location" in transfer_def, "Definition must have location field"
+        assert "line_content" in transfer_def, "Definition must have line_content field"
 
         # Validate location content
         location = transfer_def["location"]
@@ -32,6 +33,13 @@ def test_86_find_references_function_all(engine):
         assert location["line"] > 0, f"Line must be positive, got {location['line']}"
         assert str(location["file"]).endswith(".sol"), f"File must be .sol, got {location['file']}"
 
+        # Validate line_content
+        line_content = transfer_def["line_content"]
+        assert isinstance(line_content, str), f"line_content must be string, got {type(line_content)}"
+        assert line_content.strip(), "line_content should not be empty"
+        assert "transfer" in line_content.lower(), f"line_content should contain 'transfer': '{line_content}'"
+        assert "function" in line_content.lower(), f"line_content should contain 'function': '{line_content}'"
+
     # Validate usages structure and content
     usages = refs["usages"]
     assert isinstance(usages, list)
@@ -41,6 +49,7 @@ def test_86_find_references_function_all(engine):
         assert isinstance(usage, dict), "Usage must be a dictionary"
         assert "location" in usage, "Usage must have location field"
         assert "context" in usage, "Usage must have context field"
+        assert "line_content" in usage, "Usage must have line_content field"
 
         # Validate usage location
         location = usage["location"]
@@ -58,6 +67,14 @@ def test_86_find_references_function_all(engine):
             assert "transfer" in context.lower(), f"Usage context should mention 'transfer', got: {context[:100]}..."
         else:
             print(f"Warning: Empty context found for usage at line {location['line']}")
+
+        # Validate line_content
+        line_content = usage["line_content"]
+        assert isinstance(line_content, str), f"Usage line_content must be string, got {type(line_content)}"
+        assert line_content.strip(), "Usage line_content should not be empty"
+        # Most transfer usages should contain the word "transfer" or be a related call
+        if "transfer" not in line_content.lower():
+            print(f"Info: Usage line_content doesn't contain 'transfer': '{line_content}'")
 
     print(f"✓ Validated {len(definitions)} definitions and {len(usages)} usages with detailed content checks")
 
@@ -82,10 +99,16 @@ def test_87_find_references_function_usages(engine):
         # Check first usage details
         usage = usages[0]
         assert "location" in usage
+        assert "line_content" in usage
         location = usage["location"]
         assert "file" in location
         assert "line" in location
         assert "context" in usage
+
+        # Validate line_content
+        line_content = usage["line_content"]
+        assert isinstance(line_content, str), "Usage line_content must be string"
+        assert line_content.strip(), "Usage line_content should not be empty"
 
 
 def test_88_find_references_function_definitions(engine):
@@ -110,12 +133,19 @@ def test_88_find_references_function_definitions(engine):
         assert definition.get("name") == "transfer"
         assert definition.get("element_type") == "function"
         assert "location" in definition
+        assert "line_content" in definition
 
         # Should find transfer functions from fixture files
         location = definition["location"]
         assert "file" in location
         assert "line" in location
         assert str(location["file"]).endswith(".sol")
+
+        # Validate line_content
+        line_content = definition["line_content"]
+        assert isinstance(line_content, str), "Definition line_content must be string"
+        assert line_content.strip(), "Definition line_content should not be empty"
+        assert "transfer" in line_content.lower(), f"Definition line_content should contain 'transfer': '{line_content}'"
 
 
 def test_89_references_direction_forward(engine):

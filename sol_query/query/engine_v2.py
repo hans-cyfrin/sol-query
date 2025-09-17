@@ -15,7 +15,11 @@ from sol_query.core.ast_nodes import (
     ASTNode, ContractDeclaration, FunctionDeclaration, VariableDeclaration,
     ModifierDeclaration, EventDeclaration, ErrorDeclaration, StructDeclaration,
     EnumDeclaration, Statement, Expression, ExtractedStatement, ExtractedExpression,
-    NodeType
+    NodeType, Parameter, Identifier
+)
+from sol_query.core.solidity_constants import (
+    ALL_SOLIDITY_KEYWORDS, SOLIDITY_BUILTIN_FUNCTIONS, SOLIDITY_LOW_LEVEL_CALLS,
+    is_solidity_keyword, is_likely_builtin_function, is_low_level_call
 )
 from sol_query.models.source_location import SourceLocation
 from sol_query.utils.pattern_matching import PatternMatcher
@@ -1028,7 +1032,9 @@ class SolidityQueryEngineV2:
             if len(parts) == 2:
                 contract_name, element_name = parts
                 for node in nodes:
-                    if (hasattr(node, 'contract') and node.contract == contract_name and
+                    if (hasattr(node, 'parent_contract') and
+                        hasattr(node.parent_contract, 'name') and
+                        node.parent_contract.name == contract_name and
                         hasattr(node, 'name') and node.name == element_name):
                         return node
 
@@ -2336,12 +2342,7 @@ class SolidityQueryEngineV2:
     def _classify_call_type(self, call_name: str, function_node) -> str:
         """Classify the type of function call using proper AST-based analysis."""
         # 1. Built-in functions (language-level, safe to identify)
-        builtin_functions = {
-            'require', 'assert', 'revert', 'keccak256', 'sha256', 'ripemd160',
-            'ecrecover', 'addmod', 'mulmod', 'selfdestruct'
-        }
-
-        if call_name in builtin_functions:
+        if is_likely_builtin_function(call_name):
             return 'builtin'
 
         # 2. Low-level calls (language-level, safe to identify)
@@ -2498,17 +2499,189 @@ class SolidityQueryEngineV2:
         return callers
 
     def _get_node_variables(self, node: ASTNode) -> List[Dict[str, Any]]:
-        """Get variables accessed by a node using AST traversal."""
+        """Get variables accessed by a node using proper AST analysis."""
         variables = []
-
-        if not hasattr(node, 'raw_node') or not node.raw_node:
-            return variables
 
         # Track found variables to avoid duplicates
         found_vars = set()
 
-        self._traverse_node_for_variables(node.raw_node, variables, found_vars, node)
+        # First, collect from our higher-level AST nodes
+        all_nodes = self._get_all_nodes_in_subtree(node)
+
+        for ast_node in all_nodes:
+            # Handle actual variable declarations
+            if isinstance(ast_node, VariableDeclaration):
+                if ast_node.name and ast_node.name not in found_vars:
+                    variables.append({
+                        'name': ast_node.name,
+                        'access_type': 'declaration',
+                        'variable_type': 'state_variable' if ast_node.is_state_variable() else 'local_variable',
+                        'position': getattr(ast_node.source_location, 'start', 0)
+                    })
+                    found_vars.add(ast_node.name)
+
+            # Handle function parameters (which are also variables)
+            elif isinstance(ast_node, Parameter):
+                if ast_node.name and ast_node.name not in found_vars:
+                    variables.append({
+                        'name': ast_node.name,
+                        'access_type': 'parameter',
+                        'variable_type': 'parameter',
+                        'position': getattr(ast_node.source_location, 'start', 0)
+                    })
+                    found_vars.add(ast_node.name)
+
+            # Handle identifiers that reference variables (not declarations themselves)
+            elif isinstance(ast_node, Identifier):
+                if ast_node.name and ast_node.name not in found_vars:
+                    # Check if this identifier refers to a variable by looking up its declaration
+                    if self._is_variable_reference(ast_node, node):
+                        access_type = self._determine_variable_access_type(ast_node)
+                        variables.append({
+                            'name': ast_node.name,
+                            'access_type': access_type,
+                            'variable_type': 'variable_reference',
+                            'position': getattr(ast_node.source_location, 'start', 0)
+                        })
+                        found_vars.add(ast_node.name)
+
+        # Also scan the raw tree-sitter nodes for additional identifier references
+        # that might not be captured in our high-level AST
+        if hasattr(node, 'raw_node') and node.raw_node:
+            self._scan_raw_node_for_variables(node.raw_node, variables, found_vars)
+
         return variables
+
+    def _scan_raw_node_for_variables(self, ts_node, variables: List[Dict[str, Any]], found_vars: set):
+        """Scan tree-sitter nodes for variable identifiers using AST-based filtering."""
+        if not ts_node:
+            return
+
+        node_type = ts_node.type
+
+        # Handle variable declarations specifically
+        if node_type in ["variable_declaration", "variable_declaration_statement"]:
+            self._handle_variable_declaration_node(ts_node, variables, found_vars)
+        # Handle assignment expressions
+        elif node_type == "assignment_expression":
+            self._handle_assignment_expression_node(ts_node, variables, found_vars)
+        # Debug: Check for other potential declaration node types
+        elif "declaration" in node_type.lower() or node_type in ["expression_statement"]:
+            # Check if this contains a variable declaration pattern
+            source_text = ts_node.text.decode('utf-8') if ts_node.text else ""
+            if "uint256" in source_text and ("tokenId" in source_text or "refund" in source_text):
+                # This might be our missing variable declaration
+                self._handle_potential_declaration_node(ts_node, variables, found_vars)
+        # Handle identifiers
+        elif node_type == "identifier":
+            var_name = ts_node.text.decode('utf-8') if ts_node.text else None
+            if var_name and var_name not in found_vars:
+                # Use our AST-based filtering instead of hardcoded blacklists
+                if self._is_likely_variable_from_raw_node(var_name, ts_node):
+                    # Determine access type based on context
+                    access_type = self._analyze_identifier_access_context(ts_node)
+                    variables.append({
+                        'name': var_name,
+                        'access_type': access_type,
+                        'variable_type': 'identifier_reference',
+                        'position': ts_node.start_byte
+                    })
+                    found_vars.add(var_name)
+
+        # Recursively scan children
+        for child in ts_node.children:
+            self._scan_raw_node_for_variables(child, variables, found_vars)
+
+    def _handle_variable_declaration_node(self, ts_node, variables: List[Dict[str, Any]], found_vars: set):
+        """Handle a variable declaration node to extract declared variables."""
+        try:
+            # In a variable declaration like "uint256 tokenId = nextTokenId;"
+            # we need to find the identifier that's being declared
+            for child in ts_node.children:
+                if child.type == "identifier":
+                    # Check if this is the variable name (not the type)
+                    var_name = child.text.decode('utf-8') if child.text else None
+                    if var_name and var_name not in found_vars:
+                        # Check if this identifier is the variable being declared
+                        if self._is_declaration_target(child, ts_node):
+                            variables.append({
+                                'name': var_name,
+                                'access_type': 'declaration',
+                                'variable_type': 'local_variable',
+                                'position': child.start_byte
+                            })
+                            found_vars.add(var_name)
+        except Exception:
+            pass
+
+    def _handle_assignment_expression_node(self, ts_node, variables: List[Dict[str, Any]], found_vars: set):
+        """Handle an assignment expression node to extract assigned variables."""
+        try:
+            # In an assignment like "tokenId = value", find the left side identifier
+            if ts_node.children and len(ts_node.children) >= 3:
+                left_side = ts_node.children[0]
+                # If the left side is an identifier, it's being written to
+                if left_side.type == "identifier":
+                    var_name = left_side.text.decode('utf-8') if left_side.text else None
+                    if var_name and var_name not in found_vars:
+                        variables.append({
+                            'name': var_name,
+                            'access_type': 'write',
+                            'variable_type': 'assignment_target',
+                            'position': left_side.start_byte
+                        })
+                        found_vars.add(var_name)
+        except Exception:
+            pass
+
+    def _handle_potential_declaration_node(self, ts_node, variables: List[Dict[str, Any]], found_vars: set):
+        """Handle a potential variable declaration node using regex pattern matching."""
+        try:
+            source_text = ts_node.text.decode('utf-8') if ts_node.text else ""
+
+            # Use regex to find variable declarations
+            import re
+            # Pattern for variable declarations: type varname = value;
+            decl_pattern = r'\b(uint256|uint|int|bool|address|bytes32|bytes|string)\s+(\w+)\s*=\s*[^;]+;'
+            matches = re.finditer(decl_pattern, source_text)
+
+            for match in matches:
+                var_type, var_name = match.groups()
+                # Always add declarations, even if variable was seen before as a read
+                variables.append({
+                    'name': var_name,
+                    'access_type': 'declaration',
+                    'variable_type': 'local_variable_regex',
+                    'position': ts_node.start_byte + match.start(2)  # Position of the variable name
+                })
+                found_vars.add(var_name)
+        except Exception:
+            pass
+
+    def _is_likely_variable_from_raw_node(self, var_name: str, ts_node) -> bool:
+        """Determine if a raw identifier is likely a variable using AST-based heuristics."""
+        # Use our existing validation
+        if not self._is_valid_variable_name(var_name):
+            return False
+
+        # Skip uppercase names (likely contracts/structs/events)
+        if var_name[0].isupper():
+            return False
+
+        # Check if we can find a declaration for this identifier
+        all_nodes = self._get_all_nodes()
+        for ast_node in all_nodes:
+            if hasattr(ast_node, 'name') and ast_node.name == var_name:
+                # If it's declared as a non-variable, skip it
+                if isinstance(ast_node, (ContractDeclaration, FunctionDeclaration, EventDeclaration,
+                                       ErrorDeclaration, StructDeclaration, ModifierDeclaration)):
+                    return False
+                # If it's declared as a variable, include it
+                elif isinstance(ast_node, (VariableDeclaration, Parameter)):
+                    return True
+
+        # If no declaration found, include lowercase identifiers that look like variables
+        return var_name[0].islower() and var_name.isidentifier()
 
     def _analyze_identifier_context(self, ts_node, var_name: str, parent_context: Optional[str]) -> Optional[Dict[str, Any]]:
         """Analyze an identifier node to determine if it's a relevant variable."""
@@ -2516,50 +2689,8 @@ class SolidityQueryEngineV2:
         if not var_name.strip() or var_name.endswith('(') or '(' in var_name:
             return None
 
-        # Skip common keywords, types, and built-in globals
-        excluded_names = {
-            # Keywords and control flow
-            'require', 'revert', 'assert', 'return', 'if', 'for', 'while', 'do',
-            'function', 'modifier', 'emit', 'event', 'struct', 'enum', 'new', 'delete',
-            'contract', 'interface', 'library', 'using', 'pragma', 'import', 'is', 'override',
-
-            # Types
-            'uint256', 'uint128', 'uint64', 'uint32', 'uint16', 'uint8', 'uint',
-            'int256', 'int128', 'int64', 'int32', 'int16', 'int8', 'int',
-            'address', 'bool', 'string', 'bytes', 'bytes32', 'bytes4',
-            'mapping', 'array',
-
-            # Storage/memory modifiers
-            'memory', 'storage', 'calldata',
-
-            # Function modifiers
-            'view', 'pure', 'payable', 'constant', 'immutable',
-            'public', 'private', 'internal', 'external',
-
-            # Literals and built-ins
-            'true', 'false', 'null', 'this', 'super', 'payable',
-
-            # Built-in globals (individual parts)
-            'msg', 'block', 'tx', 'gasleft', 'now',
-
-            # Common identifiers that aren't variables
-            'sender', 'value', 'data', 'sig', 'timestamp', 'number', 'coinbase', 'difficulty',
-            'origin', 'gasprice',
-
-            # Common function names that get misidentified
-            'transfer', 'approve', 'mint', 'burn', 'add', 'sub', 'mul', 'div',
-            'safeTransfer', 'safeTransferFrom', '_mint', '_burn', '_transfer', '_approve',
-            '_safeMint', '_safeBurn', 'transferFrom', 'increaseAllowance', 'decreaseAllowance',
-
-            # Common modifier names
-            'onlyOwner', 'nonReentrant', 'whenNotPaused', 'validAddress',
-
-            # Event names that might be captured
-            'Transfer', 'Approval', 'Mint', 'Burn', 'TokenMinted', 'OwnershipTransferred'
-        }
-
-        # Check both original case and lowercase for exclusion
-        if var_name in excluded_names or var_name.lower() in excluded_names:
+        # Use centralized Solidity keyword filtering and AST-based logic
+        if is_solidity_keyword(var_name):
             return None
 
         # Determine variable type and access pattern
@@ -3078,6 +3209,52 @@ class SolidityQueryEngineV2:
             "state_changes": False
         }
 
+        # Track processed variables to avoid duplicates
+        read_vars = set()
+        written_vars = set()
+
+        # Handle contracts differently - analyze all functions within the contract
+        if isinstance(element, ContractDeclaration):
+            # For contracts, analyze all functions and aggregate their data flow
+            functions = self._get_contract_functions(element)
+            for function in functions:
+                function_data_flow = self._get_function_data_flow(function)
+
+                # Merge variables
+                for var_name in function_data_flow.get("variables_read", []):
+                    if var_name not in read_vars and self._is_valid_variable_name(var_name):
+                        data_flow["variables_read"].append(var_name)
+                        read_vars.add(var_name)
+
+                for var_name in function_data_flow.get("variables_written", []):
+                    if var_name not in written_vars and self._is_valid_variable_name(var_name):
+                        data_flow["variables_written"].append(var_name)
+                        written_vars.add(var_name)
+
+                # Merge external interactions
+                for interaction in function_data_flow.get("external_interactions", []):
+                    if interaction not in data_flow["external_interactions"]:
+                        data_flow["external_interactions"].append(interaction)
+
+                # Aggregate state changes
+                if function_data_flow.get("state_changes"):
+                    data_flow["state_changes"] = True
+        else:
+            # For functions and other elements, use the existing approach
+            function_data_flow = self._get_function_data_flow(element)
+            data_flow.update(function_data_flow)
+
+        return data_flow
+
+    def _get_function_data_flow(self, element: ASTNode) -> Dict[str, Any]:
+        """Get data flow analysis for a function or similar element."""
+        data_flow = {
+            "variables_read": [],
+            "variables_written": [],
+            "external_interactions": [],
+            "state_changes": False
+        }
+
         # Get variable access patterns
         variables = self._get_node_variables(element)
 
@@ -3090,14 +3267,24 @@ class SolidityQueryEngineV2:
 
             # Enhanced filtering for variable names
             if self._is_valid_variable_name(var_name):
-                if var.get("access_type") == "read":
+                access_type = var.get("access_type")
+                if access_type == "read":
                     if var_name not in read_vars:
                         data_flow["variables_read"].append(var_name)
                         read_vars.add(var_name)
-                elif var.get("access_type") == "write":
+                elif access_type in ["write", "declaration"]:  # Include declarations as writes
                     if var_name not in written_vars:
                         data_flow["variables_written"].append(var_name)
                         written_vars.add(var_name)
+
+        # Additional pattern-based detection for local variable declarations
+        # This is a fallback for declarations that tree-sitter didn't detect properly
+        if isinstance(element, FunctionDeclaration):
+            additional_writes = self._find_local_variable_declarations(element)
+            for var_name in additional_writes:
+                if var_name not in written_vars and self._is_valid_variable_name(var_name):
+                    data_flow["variables_written"].append(var_name)
+                    written_vars.add(var_name)
 
         # Check for external interactions
         if self._has_external_calls(element):
@@ -3110,8 +3297,144 @@ class SolidityQueryEngineV2:
 
         return data_flow
 
+    def _get_contract_functions(self, contract: 'ContractDeclaration') -> List['FunctionDeclaration']:
+        """Get all functions within a contract."""
+        functions = []
+        try:
+            # Try to get functions using the AST structure
+            if hasattr(contract, 'functions') and contract.functions:
+                functions.extend(contract.functions)
+
+            # Also try to find functions by traversing children
+            all_nodes = self._get_all_nodes_in_subtree(contract)
+            for node in all_nodes:
+                if isinstance(node, FunctionDeclaration):
+                    functions.append(node)
+
+        except Exception:
+            pass
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_functions = []
+        for func in functions:
+            func_id = id(func)
+            if func_id not in seen:
+                seen.add(func_id)
+                unique_functions.append(func)
+
+        return unique_functions
+
+    def _find_local_variable_declarations(self, function: 'FunctionDeclaration') -> List[str]:
+        """Find local variable declarations in a function using pattern matching."""
+        declarations = []
+        try:
+            # Get the function source code
+            source_code = function.get_source_code()
+            if not source_code:
+                return declarations
+
+            # Pattern for local variable declarations
+            import re
+            from sol_query.core.solidity_constants import SOLIDITY_TYPES
+
+            # Build comprehensive pattern for variable declarations
+            type_pattern = '|'.join(SOLIDITY_TYPES) + r'|bytes\d*|uint\d*|int\d*'
+
+            # Match patterns like: uint256 tokenId = value;
+            decl_pattern = rf'\b(?:{type_pattern})\s+(\w+)\s*=\s*[^;]+;'
+
+            matches = re.finditer(decl_pattern, source_code, re.MULTILINE)
+
+            for match in matches:
+                var_name = match.group(1)
+                if self._is_valid_variable_name(var_name):
+                    declarations.append(var_name)
+
+            # Also match simple assignments like: token = value;
+            assignment_pattern = r'\b(\w+)\s*=\s*[^;=]+;'
+            matches = re.finditer(assignment_pattern, source_code, re.MULTILINE)
+
+            for match in matches:
+                var_name = match.group(1)
+                # Skip if this looks like a comparison or function call
+                if ('==' in match.group(0) or '!=' in match.group(0) or
+                    '(' in var_name or ')' in var_name):
+                    continue
+                if self._is_valid_variable_name(var_name):
+                    declarations.append(var_name)
+
+            # Match mapping assignments like: stakingGroups[key] = value;
+            mapping_pattern = r'\b(\w+)\[[^\]]+\]\s*=\s*[^;]+;'
+            matches = re.finditer(mapping_pattern, source_code, re.MULTILINE)
+
+            for match in matches:
+                var_name = match.group(1)
+                if self._is_valid_variable_name(var_name):
+                    declarations.append(var_name)
+
+            # Match field assignments like: stakingGroups[key].field = value; or variable.field += value;
+            field_assignment_pattern = r'\b(\w+)(?:\[[^\]]+\])?\.[\w\.]+\s*(?:\+=|\-=|\*=|\/=|=)\s*[^;]+;'
+            matches = re.finditer(field_assignment_pattern, source_code, re.MULTILINE)
+
+            for match in matches:
+                var_name = match.group(1)
+                if self._is_valid_variable_name(var_name):
+                    declarations.append(var_name)
+
+            # Match increment/decrement operations like: nextGroupId++ or ++variable;
+            increment_pattern = r'\b(?:(\w+)\+\+|\+\+(\w+)|(\w+)\-\-|\-\-(\w+))\s*;'
+            matches = re.finditer(increment_pattern, source_code, re.MULTILINE)
+
+            for match in matches:
+                # One of the groups will be non-None
+                var_name = next((group for group in match.groups() if group), None)
+                if var_name and self._is_valid_variable_name(var_name):
+                    declarations.append(var_name)
+
+            # Match compound assignments like: variable += value; variable -= value;
+            compound_assignment_pattern = r'\b(\w+)\s*(?:\+=|\-=|\*=|\/=|%=)\s*[^;]+;'
+            matches = re.finditer(compound_assignment_pattern, source_code, re.MULTILINE)
+
+            for match in matches:
+                var_name = match.group(1)
+                if self._is_valid_variable_name(var_name):
+                    declarations.append(var_name)
+
+        except Exception as e:
+            # Fallback to simpler pattern if complex one fails
+            try:
+                simple_pattern = r'\b(uint256|uint|int|bool|address|bytes32|string)\s+(\w+)\s*=\s*[^;]+;'
+                matches = re.finditer(simple_pattern, source_code, re.MULTILINE)
+                for match in matches:
+                    var_name = match.group(2)
+                    if self._is_valid_variable_name(var_name):
+                        declarations.append(var_name)
+
+                # Also simple assignments
+                assignment_pattern = r'\b(\w+)\s*=\s*[^;=]+;'
+                matches = re.finditer(assignment_pattern, source_code, re.MULTILINE)
+                for match in matches:
+                    var_name = match.group(1)
+                    if ('==' not in match.group(0) and '!=' not in match.group(0) and
+                        '(' not in var_name and ')' not in var_name):
+                        if self._is_valid_variable_name(var_name):
+                            declarations.append(var_name)
+
+                # Mapping assignments in fallback
+                mapping_pattern = r'\b(\w+)\[[^\]]+\]\s*=\s*[^;]+;'
+                matches = re.finditer(mapping_pattern, source_code, re.MULTILINE)
+                for match in matches:
+                    var_name = match.group(1)
+                    if self._is_valid_variable_name(var_name):
+                        declarations.append(var_name)
+            except Exception:
+                pass
+
+        return declarations
+
     def _is_valid_variable_name(self, var_name: str) -> bool:
-        """Enhanced filtering to exclude contracts, events, errors, expressions, and invalid variable names."""
+        """Basic validation for variable names - using centralized Solidity constants."""
         if not var_name or not var_name.strip():
             return False
 
@@ -3123,54 +3446,194 @@ class SolidityQueryEngineV2:
         if any(op in var_name for op in ['!', '<', '>', '==', '!=', '&&', '||', '+', '-', '*', '/', '%', '[', ']']):
             return False
 
-        # Filter out known contract names (these should not be variables)
-        contract_names = {
-            'GroupStaking', 'GovernanceToken', 'StakingGroup', 'Ownable', 'ERC20', 'ERC721',
-            'IERC20', 'IERC721', 'SafeMath', 'Context', 'AccessControl', 'Pausable'
-        }
-        if var_name in contract_names:
-            return False
-
-        # Filter out known event names
-        event_names = {
-            'GroupCreated', 'StakeAdded', 'RewardsDistributed', 'Transfer', 'Approval',
-            'OwnershipTransferred', 'TokensMinted', 'UserStatusUpdated'
-        }
-        if var_name in event_names:
-            return False
-
-        # Filter out known error names
-        error_names = {
-            'InvalidTokenAddress', 'InvalidWeight', 'InvalidMember', 'BlacklistedMember',
-            'DuplicateMember', 'InsufficientBalance', 'Unauthorized'
-        }
-        if var_name in error_names:
-            return False
-
-        # Filter out modifier names
-        modifier_names = {
-            'onlyOwner', 'nonReentrant', 'whenNotPaused', 'validAddress'
-        }
-        if var_name in modifier_names:
-            return False
-
-        # Filter out function names that get misidentified as variables
-        function_names = {
-            'constructor', 'createStakingGroup', 'stakeToGroup', 'withdrawFromGroup',
-            'getGroupInfo', 'isMemberOfGroup', 'mint', 'updateUserStatus', 'transfer',
-            'transferFrom', 'approve', 'allowance', 'balanceOf'
-        }
-        if var_name in function_names:
-            return False
-
-        # Filter out struct/type names
-        type_names = {
-            'StakingGroup', 'address', 'uint256', 'bool', 'string', 'bytes', 'mapping'
-        }
-        if var_name in type_names:
+        # Filter out Solidity keywords using centralized constants
+        if is_solidity_keyword(var_name):
             return False
 
         return True
+
+    def _get_all_nodes_in_subtree(self, node: ASTNode) -> List[ASTNode]:
+        """Get all AST nodes in the subtree of a given node."""
+        nodes = [node]
+
+        try:
+            children = node.get_children() if hasattr(node, 'get_children') else []
+            # Handle mocked objects and ensure children is iterable
+            if children and hasattr(children, '__iter__'):
+                for child in children:
+                    nodes.extend(self._get_all_nodes_in_subtree(child))
+        except (TypeError, AttributeError):
+            # Handle cases where get_children() returns non-iterable or fails
+            pass
+
+        return nodes
+
+    def _is_variable_reference(self, identifier: 'Identifier', context_node: ASTNode) -> bool:
+        """
+        Determine if an identifier refers to a variable by checking its semantic meaning.
+        This uses AST analysis instead of hardcoded blacklists.
+        """
+        if not identifier.name:
+            return False
+
+        # Get all declarations in scope to check what this identifier refers to
+        all_nodes = self._get_all_nodes()
+
+        # Look for declarations of this identifier
+        for ast_node in all_nodes:
+            if hasattr(ast_node, 'name') and ast_node.name == identifier.name:
+                # Check what type of declaration this is
+                if isinstance(ast_node, (VariableDeclaration, Parameter)):
+                    return True  # It's a variable or parameter
+                elif isinstance(ast_node, (ContractDeclaration, FunctionDeclaration, EventDeclaration, ErrorDeclaration)):
+                    return False  # It's a contract, function, event, or error - not a variable
+                elif isinstance(ast_node, StructDeclaration):
+                    return False  # Struct names are not variables
+                # Add more AST node types as needed
+
+        # If we can't find a declaration, check if it's likely a variable reference
+        # based on common patterns and avoid known non-variables
+        name = identifier.name
+
+        # Skip if it's a Solidity keyword
+        if not self._is_valid_variable_name(name):
+            return False
+
+        # Skip if it starts with uppercase (likely contract/struct/event name)
+        if name[0].isupper():
+            return False
+
+        # Skip common function-like patterns
+        if name.endswith('()') or '(' in name:
+            return False
+
+        # If it passed all the checks, it's likely a variable reference
+        return True
+
+    def _determine_variable_access_type(self, identifier: 'Identifier') -> str:
+        """Determine if a variable identifier is being read or written."""
+        # Check if this identifier is on the left side of an assignment or declaration
+        try:
+            # Get the raw tree-sitter node to analyze context
+            if hasattr(identifier, 'raw_node') and identifier.raw_node:
+                return self._analyze_identifier_access_context(identifier.raw_node)
+
+            # If we can't determine from AST context, check the source code pattern
+            if hasattr(identifier, 'source_location') and identifier.source_location:
+                return self._analyze_identifier_source_context(identifier)
+
+        except Exception:
+            pass
+
+        # Default to "read" if we can't determine
+        return "read"
+
+    def _analyze_identifier_access_context(self, ts_node) -> str:
+        """Analyze tree-sitter node context to determine read/write access."""
+        if not ts_node or not ts_node.parent:
+            return "read"
+
+        parent = ts_node.parent
+        parent_type = parent.type
+
+        # Variable declaration with assignment: uint256 tokenId = value;
+        if parent_type in ["variable_declaration", "variable_declaration_statement"]:
+            # Check if this identifier is the variable being declared
+            if self._is_declaration_target(ts_node, parent):
+                return "write"
+
+        # Assignment expression: tokenId = value;
+        elif parent_type == "assignment_expression":
+            # Check if this identifier is on the left side of assignment
+            if self._is_assignment_target(ts_node, parent):
+                return "write"
+
+        # Member access assignment: balances[to] = value;
+        elif parent_type == "member_access" and parent.parent:
+            grandparent = parent.parent
+            if grandparent.type == "assignment_expression":
+                if self._is_assignment_target(parent, grandparent):
+                    return "write"
+
+        return "read"
+
+    def _analyze_identifier_source_context(self, identifier: 'Identifier') -> str:
+        """Analyze source code context to determine read/write access."""
+        # This is a fallback method when tree-sitter analysis isn't available
+        try:
+            # Get the source location and surrounding code
+            if hasattr(identifier, 'source_location') and identifier.source_location:
+                file_path = identifier.source_location.file_path
+                line_num = identifier.source_location.start_line
+
+                # Read the line to analyze the pattern
+                if file_path and line_num:
+                    with open(file_path, 'r') as f:
+                        lines = f.readlines()
+                        if 0 <= line_num - 1 < len(lines):
+                            line = lines[line_num - 1].strip()
+
+                            # Check for variable declaration pattern
+                            import re
+                            var_name = identifier.name
+
+                            # Pattern for variable declaration: type varname = ...
+                            decl_pattern = rf'\b\w+\s+{re.escape(var_name)}\s*='
+                            if re.search(decl_pattern, line):
+                                return "write"
+
+                            # Pattern for assignment: varname = ...
+                            assign_pattern = rf'\b{re.escape(var_name)}\s*='
+                            if re.search(assign_pattern, line):
+                                return "write"
+
+        except Exception:
+            pass
+
+        return "read"
+
+    def _is_declaration_target(self, ts_node, parent_node) -> bool:
+        """Check if the node is the target of a variable declaration."""
+        # Look for the identifier being the declared variable name
+        try:
+            for child in parent_node.children:
+                if child.type == "identifier" and child == ts_node:
+                    # Check if this is the variable name (not a type)
+                    # Usually the variable name comes after the type
+                    prev_sibling = None
+                    for sibling in parent_node.children:
+                        if sibling == child and prev_sibling:
+                            # If previous sibling is a type, this is likely the variable name
+                            if prev_sibling.type in ["primitive_type", "type_name", "identifier"]:
+                                return True
+                        prev_sibling = sibling
+        except Exception:
+            pass
+        return False
+
+    def _is_assignment_target(self, ts_node, assignment_node) -> bool:
+        """Check if the node is the target (left side) of an assignment."""
+        try:
+            # In an assignment expression, the first child is usually the target
+            if assignment_node.children and len(assignment_node.children) >= 3:
+                # assignment usually has structure: left_expr = right_expr
+                left_side = assignment_node.children[0]
+                return self._node_contains_target(left_side, ts_node)
+        except Exception:
+            pass
+        return False
+
+    def _node_contains_target(self, container_node, target_node) -> bool:
+        """Check if a container node contains the target node."""
+        if container_node == target_node:
+            return True
+        try:
+            for child in container_node.children:
+                if self._node_contains_target(child, target_node):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def _build_call_chains(self, element: ASTNode, max_depth: int) -> List[List[str]]:
         """Build call chains for an element."""

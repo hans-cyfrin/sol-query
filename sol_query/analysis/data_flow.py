@@ -10,6 +10,7 @@ from sol_query.core.ast_nodes import (
     Identifier, CallExpression, BinaryExpression,
     ReturnStatement, ExpressionStatement
 )
+from sol_query.core.solidity_constants import is_solidity_keyword
 
 
 class FlowType(str, Enum):
@@ -256,7 +257,10 @@ class DataFlowAnalyzer:
 
         # Check if this is a variable declaration with assignment
         import re
-        var_decl_pattern = r'(uint256|int256|bool|address|string|bytes\d*)\s+(\w+)\s*=\s*(.+);'
+        # Build pattern for variable declarations using centralized types
+        from sol_query.core.solidity_constants import SOLIDITY_TYPES
+        type_pattern = '|'.join(SOLIDITY_TYPES) + r'|bytes\d*'  # Include bytesN variants
+        var_decl_pattern = rf'({type_pattern})\s+(\w+)\s*=\s*(.+);'
         match = re.match(var_decl_pattern, source.strip())
 
         if match:
@@ -277,8 +281,8 @@ class DataFlowAnalyzer:
             identifiers = re.findall(identifier_pattern, var_value)
 
             for identifier in identifiers:
-                # Skip keywords and literals
-                if identifier not in ['uint256', 'int256', 'bool', 'address', 'string', 'true', 'false'] and not identifier.isdigit():
+                # Skip Solidity keywords and literals using centralized constants
+                if not is_solidity_keyword(identifier) and not identifier.isdigit():
                     read_point = DataFlowPoint(
                         node=statement,  # We use the statement as the node since we don't have the actual identifier node
                         variable_name=identifier,
@@ -287,13 +291,45 @@ class DataFlowAnalyzer:
                     )
                     graph.add_point(read_point)
 
-        # Handle if statements - analyze nested statements
-        elif source.strip().startswith('if'):
-            if hasattr(statement, 'body') and statement.body:
-                if hasattr(statement.body, 'statements'):
-                    self._analyze_statement_block(statement.body.statements, graph)
-                elif isinstance(statement.body, list):
-                    self._analyze_statement_block(statement.body, graph)
+        # Also check for simple assignment statements: varname = value;
+        else:
+            assignment_pattern = rf'(\w+)\s*=\s*(.+);'
+            assignment_match = re.match(assignment_pattern, source.strip())
+            if assignment_match:
+                var_name, var_value = assignment_match.groups()
+
+                # Skip if this looks like a function call assignment or complex expression
+                if not any(char in var_name for char in ['(', ')', '[', ']', '.']):
+                    # Create a write point for the assignment
+                    write_point = DataFlowPoint(
+                        node=statement,
+                        variable_name=var_name,
+                        is_write=True,
+                        flow_type=FlowType.DIRECT
+                    )
+                    graph.add_point(write_point)
+
+                    # Find variables in the value expression
+                    identifier_pattern = r'\b(\w+)\b'
+                    identifiers = re.findall(identifier_pattern, var_value)
+
+                    for identifier in identifiers:
+                        if not is_solidity_keyword(identifier) and not identifier.isdigit():
+                            read_point = DataFlowPoint(
+                                node=statement,
+                                variable_name=identifier,
+                                is_read=True,
+                                flow_type=FlowType.DIRECT
+                            )
+                            graph.add_point(read_point)
+
+            # Handle if statements - analyze nested statements
+            elif source.strip().startswith('if'):
+                if hasattr(statement, 'body') and statement.body:
+                    if hasattr(statement.body, 'statements'):
+                        self._analyze_statement_block(statement.body.statements, graph)
+                    elif isinstance(statement.body, list):
+                        self._analyze_statement_block(statement.body, graph)
 
     def _analyze_assignment(self, assignment: Expression, graph: DataFlowGraph):
         """Analyze an assignment expression (simplified implementation)."""

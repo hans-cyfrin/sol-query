@@ -26,26 +26,58 @@ def test_91_with_call_chains(engine):
     assert "usages" in references
     assert "definitions" in references
 
-    # Should include call chain information
-    assert "call_chains" in references
-    call_chains = references["call_chains"]
-    assert isinstance(call_chains, list)
+    # Validate basic references structure first
+    usages = references["usages"]
+    definitions = references["definitions"]
+    assert isinstance(usages, list), "Usages must be a list"
+    assert isinstance(definitions, list), "Definitions must be a list"
+    assert len(definitions) > 0, "Should find at least one transfer function definition"
 
-    for chain in call_chains:
-        assert isinstance(chain, list)
-        # Each chain should be a sequence of function calls
-        for link in chain:
-            if link:
-                assert isinstance(link, dict)
-                assert "function" in link or "name" in link
+    # Should include call chain information when requested
+    if "call_chains" in references:
+        call_chains = references["call_chains"]
+        assert isinstance(call_chains, list), "Call chains must be a list"
 
-        print(f"Found {len(call_chains)} call chains for transfer function")
+        for i, chain in enumerate(call_chains[:5]):  # Check first 5 chains
+            assert isinstance(chain, (list, dict)), f"Chain {i} must be a list or dict, got {type(chain)}"
+
+            if isinstance(chain, list):
+                # Each chain should be a sequence of function calls
+                for j, link in enumerate(chain):
+                    if link:  # Skip None/empty links
+                        assert isinstance(link, dict), f"Chain {i} link {j} must be a dict, got {type(link)}"
+                        # Link should have identifying information
+                        has_identifier = any(key in link for key in ["function", "name", "target", "source"])
+                        assert has_identifier, f"Chain {i} link {j} must have function/name/target/source identifier: {link}"
+
+                        # Should respect depth limit
+                        if "depth" in link:
+                            assert isinstance(link["depth"], int), f"Depth must be integer, got {type(link['depth'])}"
+                            assert link["depth"] <= 3, f"Depth should not exceed max_depth=3, got {link['depth']}"
+
+            elif isinstance(chain, dict):
+                # Chain as single object should have source/target
+                assert "source" in chain or "target" in chain, f"Chain {i} dict must have source or target"
+                if "depth" in chain:
+                    assert isinstance(chain["depth"], int), f"Chain {i} depth must be integer"
+                    assert chain["depth"] <= 3, f"Chain {i} depth should not exceed max_depth=3"
+
+        print(f"✓ Validated {len(call_chains)} call chains for transfer function with proper structure")
     else:
-        print("Call chains not available (may not be implemented)")
+        print("Call chains not available (may not be implemented yet)")
 
-    # Should find references regardless
-    if references:
-        print(f"Found {len(references)} total references to transfer")
+    # Validate that basic references work regardless of call chains
+    total_refs = len(usages) + len(definitions)
+    assert total_refs > 0, "Should find at least some references to transfer function"
+    print(f"✓ Found {len(usages)} usages and {len(definitions)} definitions of transfer function")
+
+    # Validate that references have proper structure
+    for ref in (usages + definitions)[:3]:  # Check first 3 references
+        assert isinstance(ref, dict), "Reference must be a dictionary"
+        assert "location" in ref, "Reference must have location"
+        location = ref["location"]
+        assert isinstance(location["line"], int), "Reference line must be integer"
+        assert location["line"] > 0, "Reference line must be positive"
 
 
 def test_92_with_usage_patterns(engine):

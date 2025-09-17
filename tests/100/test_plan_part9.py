@@ -125,19 +125,62 @@ def test_83_basic_find_references_function(engine):
     # Should find references to transfer function (at least definitions)
     assert len(definitions) > 0, "Should find at least the definition of transfer function"
 
-    if all_references:
-        for ref in all_references:
-            assert isinstance(ref, dict)
-            assert "location" in ref
+    # Validate definition structure and content
+    for definition in definitions:
+        assert isinstance(definition, dict), "Definition must be a dictionary"
+        assert "name" in definition, "Definition must have a name field"
+        assert "element_type" in definition, "Definition must have element_type field"
+        assert "location" in definition, "Definition must have location field"
 
-        print(f"Found {len(usages)} usages and {len(definitions)} definitions of transfer function")
+        # Validate name and type
+        assert definition["name"] == "transfer", f"Expected name 'transfer', got '{definition['name']}'"
+        assert definition["element_type"] == "function", f"Expected element_type 'function', got '{definition['element_type']}'"
 
-        # Should find references in various contracts
-        ref_files = {ref.get("location", {}).get("file", "") for ref in all_references}
-        ref_files = {f for f in ref_files if f}  # Remove empty strings
-        print(f"References found in files: {len(ref_files)}")
-    else:
-        print("No references found (this may be expected depending on implementation)")
+        # Validate location structure
+        location = definition["location"]
+        assert isinstance(location, dict), "Location must be a dictionary"
+        assert "file" in location, "Location must have file field"
+        assert "line" in location, "Location must have line field"
+        assert "column" in location, "Location must have column field"
+
+        # Validate location values
+        assert isinstance(location["line"], int), f"Line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Line number must be positive, got {location['line']}"
+        assert isinstance(location["column"], int), f"Column must be integer, got {type(location['column'])}"
+        assert location["column"] >= 0, f"Column number must be non-negative, got {location['column']}"
+        assert str(location["file"]).endswith(".sol"), f"File must be .sol file, got {location['file']}"
+
+    # Validate usage structure if present
+    for usage in usages:
+        assert isinstance(usage, dict), "Usage must be a dictionary"
+        assert "location" in usage, "Usage must have location field"
+        assert "context" in usage, "Usage must have context field"
+
+        # Validate usage location
+        location = usage["location"]
+        assert isinstance(location, dict), "Usage location must be a dictionary"
+        assert "file" in location, "Usage location must have file field"
+        assert "line" in location, "Usage location must have line field"
+        assert isinstance(location["line"], int), f"Usage line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Usage line number must be positive, got {location['line']}"
+
+        # Validate context structure
+        context = usage["context"]
+        assert isinstance(context, str), f"Context must be string, got {type(context)}"
+        # Note: Context might be empty if not yet populated by the engine
+        if len(context.strip()) > 0:
+            assert "transfer" in context.lower(), f"Context should mention 'transfer', got: {context[:100]}..."
+        else:
+            print(f"Warning: Empty context found for usage at line {location['line']}")
+
+    print(f"✓ Found {len(usages)} usages and {len(definitions)} definitions of transfer function")
+    print(f"✓ All definitions and usages have valid structure and content")
+
+    # Should find references in various contracts
+    ref_files = {ref.get("location", {}).get("file", "") for ref in all_references}
+    ref_files = {f for f in ref_files if f}  # Remove empty strings
+    assert len(ref_files) > 0, "Should find references in at least one file"
+    print(f"✓ References found in {len(ref_files)} files: {list(ref_files)[:3]}...")
 
 
 def test_84_find_references_variable_state(engine):
@@ -164,19 +207,87 @@ def test_84_find_references_variable_state(engine):
     definitions = references_data["definitions"]
     all_references = usages + definitions
 
-    # Should find references to balances variable (at least definitions)
-    if all_references:
-        for ref in all_references:
-            assert isinstance(ref, dict)
-            assert "location" in ref
+    # Should find the balances variable definition
+    assert len(definitions) > 0, "Should find at least the definition of balances variable"
 
-        print(f"Found {len(usages)} usages and {len(definitions)} definitions of balances variable")
+    # Validate definition structure and content for variables
+    for definition in definitions:
+        assert isinstance(definition, dict), "Variable definition must be a dictionary"
+        assert "name" in definition, "Variable definition must have a name field"
+        assert "element_type" in definition, "Variable definition must have element_type field"
+        assert "location" in definition, "Variable definition must have location field"
 
-        # Should find references in Token-related functions
-        ref_contexts = {ref.get("context", {}).get("function") for ref in all_references if ref.get("context")}
-        print(f"Referenced in functions: {ref_contexts}")
-    else:
-        print("No references found (this may be expected depending on implementation)")
+        # Validate variable-specific content
+        assert definition["name"] == "balances", f"Expected name 'balances', got '{definition['name']}'"
+        assert definition["element_type"] == "variable", f"Expected element_type 'variable', got '{definition['element_type']}'"
+
+        # Validate location structure
+        location = definition["location"]
+        assert isinstance(location, dict), "Variable location must be a dictionary"
+        assert "file" in location, "Variable location must have file field"
+        assert "line" in location, "Variable location must have line field"
+        assert isinstance(location["line"], int), f"Variable line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Variable line number must be positive, got {location['line']}"
+        assert str(location["file"]).endswith(".sol"), f"Variable file must be .sol file, got {location['file']}"
+
+        # Validate context structure
+        if "context" in definition:
+            context = definition["context"]
+            assert isinstance(context, str), f"Variable context must be string, got {type(context)}"
+            # Note: Context might be empty if not yet populated by the engine
+            if len(context.strip()) > 0:
+                assert "balances" in context, f"Variable context should mention 'balances', got: {context[:100]}..."
+            else:
+                print(f"Warning: Empty context found for variable definition at line {location['line']}")
+
+    # Validate usage structure and content for variables
+    expected_usage_patterns = ["array_access", "variable_read", "assignment", "mapping_access"]
+    found_usage_types = set()
+
+    for usage in usages:
+        assert isinstance(usage, dict), "Variable usage must be a dictionary"
+        assert "location" in usage, "Variable usage must have location field"
+        assert "context" in usage, "Variable usage must have context field"
+
+        # Track usage types if available
+        if "usage_type" in usage:
+            usage_type = usage["usage_type"]
+            found_usage_types.add(usage_type)
+            assert usage_type in expected_usage_patterns + ["variable_read", "variable_write"], f"Unexpected usage type: {usage_type}"
+
+        # Validate usage location
+        location = usage["location"]
+        assert isinstance(location, dict), "Variable usage location must be a dictionary"
+        assert "line" in location, "Variable usage location must have line field"
+        assert isinstance(location["line"], int), f"Variable usage line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Variable usage line number must be positive, got {location['line']}"
+
+        # Validate context structure
+        context = usage["context"]
+        assert isinstance(context, str), f"Variable usage context must be string, got {type(context)}"
+        # Note: Context might be empty if not yet populated by the engine
+        if len(context.strip()) > 0:
+            assert "balances" in context, f"Variable usage context should mention 'balances', got: {context[:100]}..."
+        else:
+            print(f"Warning: Empty context found for variable usage at line {location['line']}")
+
+    print(f"✓ Found {len(usages)} usages and {len(definitions)} definitions of balances variable")
+    if found_usage_types:
+        print(f"✓ Found usage types: {sorted(found_usage_types)}")
+
+    # Should find meaningful usage contexts
+    if usages:
+        # Check that we have different types of variable usage contexts
+        contexts = [usage.get("context", "") for usage in usages]
+        non_empty_contexts = [c for c in contexts if c.strip()]
+        assert len(non_empty_contexts) > 0, "Should have at least one non-empty usage context"
+
+        # Check for expected variable usage patterns in contexts
+        mapping_accesses = [c for c in contexts if "balances[" in c]
+        assignments = [c for c in contexts if "balances" in c and "=" in c]
+        print(f"✓ Found {len(mapping_accesses)} mapping accesses, {len(assignments)} assignments")
+
+    print(f"✓ All variable references have valid structure and content")
 
 
 def test_85_find_references_event_emit_sites(engine):
@@ -233,20 +344,57 @@ def test_86_find_references_modifier_usage(engine):
     assert isinstance(references, dict)
 
     # Should find functions using onlyOwner modifier
-    all_refs = references.get("usages", []) + references.get("definitions", [])
+    usages = references.get("usages", [])
+    definitions = references.get("definitions", [])
+    all_refs = usages + definitions
+
+    # Validate modifier definitions
+    for definition in definitions:
+        assert isinstance(definition, dict), "Modifier definition must be a dictionary"
+        if "name" in definition:
+            assert definition["name"] == "onlyOwner", f"Expected modifier name 'onlyOwner', got '{definition['name']}'"
+        if "element_type" in definition:
+            assert definition["element_type"] == "modifier", f"Expected element_type 'modifier', got '{definition['element_type']}'"
+
+        assert "location" in definition, "Modifier definition must have location field"
+        location = definition["location"]
+        assert isinstance(location, dict), "Modifier location must be a dictionary"
+        assert "file" in location, "Modifier location must have file field"
+        assert "line" in location, "Modifier location must have line field"
+        assert isinstance(location["line"], int), f"Modifier line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Modifier line number must be positive, got {location['line']}"
+
+    # Validate modifier usages (functions that use the modifier)
+    for usage in usages:
+        assert isinstance(usage, dict), "Modifier usage must be a dictionary"
+        assert "location" in usage, "Modifier usage must have location field"
+        assert "context" in usage, "Modifier usage must have context field"
+
+        # Validate context structure
+        context = usage["context"]
+        assert isinstance(context, str), f"Modifier usage context must be string, got {type(context)}"
+        # Note: Context might be empty if not yet populated by the engine
+        if len(context.strip()) > 0:
+            assert "onlyOwner" in context, f"Modifier usage context should mention 'onlyOwner', got: {context[:100]}..."
+        else:
+            print(f"Warning: Empty context found for modifier usage at line {location['line']}")
+
+    print(f"✓ Found {len(usages)} usages and {len(definitions)} definitions of onlyOwner modifier")
+
     if all_refs:
+        # Check for function contexts that use the modifier
+        function_contexts = [ref.get("context", "") for ref in all_refs if ref.get("context")]
+        modifier_using_functions = [ctx for ctx in function_contexts if "onlyOwner" in ctx and "function" in ctx.lower()]
+
+        print(f"✓ Found {len(modifier_using_functions)} function contexts using onlyOwner modifier")
+
+        # Validate structure of all references
         for ref in all_refs:
-            assert isinstance(ref, dict)
-            assert "location" in ref
-
-        print(f"Found {len(all_refs)} functions using onlyOwner modifier")
-
-        # Should find functions like setValue, mint, transferOwnership
-        ref_functions = {ref.get("context", {}).get("function") for ref in all_refs if ref.get("context")}
-        expected_modified_functions = {"setValue", "mint", "transferOwnership"}
-        found_modified = expected_modified_functions.intersection(ref_functions) if ref_functions else set()
-        if found_modified:
-            print(f"Found expected modified functions: {found_modified}")
+            assert isinstance(ref, dict), "Reference must be a dictionary"
+            assert "location" in ref, "Reference must have location field"
+            location = ref["location"]
+            assert isinstance(location["line"], int), f"Reference line must be integer, got {type(location['line'])}"
+            assert location["line"] > 0, f"Reference line number must be positive, got {location['line']}"
     else:
         print("No onlyOwner modifier usage found (this may be expected depending on implementation)")
 

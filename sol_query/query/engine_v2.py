@@ -1392,6 +1392,9 @@ class SolidityQueryEngineV2:
         usages = []
         variable_name = getattr(variable, 'name', '')
 
+        if not variable_name:
+            return usages
+
         # Search through all nodes for variable usage
         all_nodes = self._get_all_nodes()
 
@@ -1399,28 +1402,47 @@ class SolidityQueryEngineV2:
             if node == variable:  # Skip the variable definition itself
                 continue
 
-            node_source = getattr(node, 'source_code', '')
-            if variable_name in node_source:
-                # Determine usage type
-                usage_type = "variable_read"
-                if f"{variable_name} =" in node_source or f"{variable_name}=" in node_source:
-                    usage_type = "assignment"
-                elif f"{variable_name}[" in node_source:
-                    usage_type = "array_access"
-                elif f"{variable_name}." in node_source:
-                    usage_type = "member_access"
+            # Try to get source code using different methods
+            node_source = ''
+            try:
+                if hasattr(node, 'get_source_code') and callable(getattr(node, 'get_source_code')):
+                    node_source = node.get_source_code()
+                elif hasattr(node, 'source_code'):
+                    node_source = getattr(node, 'source_code', '')
+                # Also check for other possible text attributes
+                elif hasattr(node, 'text'):
+                    node_source = getattr(node, 'text', '')
+                elif hasattr(node, 'raw_text'):
+                    node_source = getattr(node, 'raw_text', '')
+            except Exception:
+                # If get_source_code() fails, skip this node
+                continue
 
-                usage_info = {
-                    "location": self._get_node_location(node),
-                    "usage_type": usage_type,
-                    "context": self._extract_usage_context(variable_name, node_source),
-                    "node_type": type(node).__name__,
-                    "element_name": variable_name,
-                    "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source
-                }
+            if not node_source or variable_name not in node_source:
+                continue
 
-                if self._usage_passes_filters(usage_info, filters):
-                    usages.append(usage_info)
+            # Determine usage type based on context
+            usage_type = "variable_read"
+            if f"{variable_name} =" in node_source or f"{variable_name}=" in node_source:
+                usage_type = "assignment"
+            elif f"{variable_name}[" in node_source:
+                usage_type = "array_access"
+            elif f"{variable_name}." in node_source:
+                usage_type = "member_access"
+            elif f"{variable_name}.push(" in node_source:
+                usage_type = "array_push"
+
+            usage_info = {
+                "location": self._get_node_location(node),
+                "usage_type": usage_type,
+                "context": self._extract_usage_context(variable_name, node_source),
+                "node_type": type(node).__name__,
+                "element_name": variable_name,
+                "source_snippet": node_source[:200] + "..." if len(node_source) > 200 else node_source
+            }
+
+            if self._usage_passes_filters(usage_info, filters):
+                usages.append(usage_info)
 
         return usages
 

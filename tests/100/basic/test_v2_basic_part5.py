@@ -10,23 +10,56 @@ def test_86_find_references_function_all(engine):
     refs = resp["data"]["references"]
     assert "usages" in refs and "definitions" in refs
 
-    # Validate definitions structure
+    # Validate definitions structure and content
     definitions = refs["definitions"]
     assert isinstance(definitions, list)
-    if definitions:
-        # At least one transfer function should be found
-        transfer_def = definitions[0]
-        assert transfer_def.get("name") == "transfer"
-        assert transfer_def.get("element_type") == "function"
-        assert "location" in transfer_def
+    assert len(definitions) > 0, "Should find at least one transfer function definition"
 
-    # Validate usages structure
+    for transfer_def in definitions:
+        # Validate definition structure
+        assert isinstance(transfer_def, dict), "Definition must be a dictionary"
+        assert transfer_def.get("name") == "transfer", f"Expected name 'transfer', got '{transfer_def.get('name')}'"
+        assert transfer_def.get("element_type") == "function", f"Expected element_type 'function', got '{transfer_def.get('element_type')}'"
+        assert "location" in transfer_def, "Definition must have location field"
+
+        # Validate location content
+        location = transfer_def["location"]
+        assert isinstance(location, dict), "Location must be a dictionary"
+        assert "file" in location, "Location must have file field"
+        assert "line" in location, "Location must have line field"
+        assert "column" in location, "Location must have column field"
+        assert isinstance(location["line"], int), f"Line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Line must be positive, got {location['line']}"
+        assert str(location["file"]).endswith(".sol"), f"File must be .sol, got {location['file']}"
+
+    # Validate usages structure and content
     usages = refs["usages"]
     assert isinstance(usages, list)
-    # Usages should have location information
-    for usage in usages[:3]:  # Check first 3 usages
-        assert "location" in usage
-        assert "context" in usage
+
+    # Usages should have proper structure
+    for usage in usages[:5]:  # Check first 5 usages
+        assert isinstance(usage, dict), "Usage must be a dictionary"
+        assert "location" in usage, "Usage must have location field"
+        assert "context" in usage, "Usage must have context field"
+
+        # Validate usage location
+        location = usage["location"]
+        assert isinstance(location, dict), "Usage location must be a dictionary"
+        assert "file" in location, "Usage location must have file field"
+        assert "line" in location, "Usage location must have line field"
+        assert isinstance(location["line"], int), f"Usage line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Usage line must be positive, got {location['line']}"
+
+        # Validate usage context
+        context = usage["context"]
+        assert isinstance(context, str), f"Usage context must be string, got {type(context)}"
+        # Note: Context might be empty if not yet populated by the engine
+        if len(context.strip()) > 0:
+            assert "transfer" in context.lower(), f"Usage context should mention 'transfer', got: {context[:100]}..."
+        else:
+            print(f"Warning: Empty context found for usage at line {location['line']}")
+
+    print(f"✓ Validated {len(definitions)} definitions and {len(usages)} usages with detailed content checks")
 
 
 def test_87_find_references_function_usages(engine):
@@ -143,22 +176,73 @@ def test_95_variable_references_all(engine):
     refs = resp["data"]["references"]
     assert "definitions" in refs and "usages" in refs
 
-    # Validate variable definition
+    # Validate variable definition with detailed checks
     definitions = refs["definitions"]
     assert isinstance(definitions, list)
-    if definitions:
-        balances_def = definitions[0]
-        assert balances_def.get("name") == "balances"
-        assert balances_def.get("element_type") == "variable"
-        assert "location" in balances_def
+    assert len(definitions) > 0, "Should find at least one balances variable definition"
 
-        # balances should be from ERC721WithImports.sol or sample_contract.sol
+    for balances_def in definitions:
+        # Validate definition structure
+        assert isinstance(balances_def, dict), "Variable definition must be a dictionary"
+        assert balances_def.get("name") == "balances", f"Expected name 'balances', got '{balances_def.get('name')}'"
+        assert balances_def.get("element_type") == "variable", f"Expected element_type 'variable', got '{balances_def.get('element_type')}'"
+        assert "location" in balances_def, "Variable definition must have location field"
+
+        # Validate location details
         location = balances_def["location"]
-        assert str(location.get("file")).endswith(".sol")
+        assert isinstance(location, dict), "Variable location must be a dictionary"
+        assert "file" in location, "Variable location must have file field"
+        assert "line" in location, "Variable location must have line field"
+        assert isinstance(location["line"], int), f"Variable line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Variable line must be positive, got {location['line']}"
+        assert str(location.get("file")).endswith(".sol"), f"Variable file must be .sol, got {location['file']}"
 
-    # Validate variable usages
+        # Expected files for balances variable
+        expected_files = ["ERC721WithImports.sol", "sample_contract.sol", "MultipleInheritance.sol"]
+        file_found = any(expected_file in str(location["file"]) for expected_file in expected_files)
+        if not file_found:
+            print(f"Warning: balances found in unexpected file: {location['file']}")
+
+    # Validate variable usages with detailed checks
     usages = refs["usages"]
     assert isinstance(usages, list)
+
+    # Check usage patterns for variables
+    usage_patterns = set()
+    for usage in usages[:10]:  # Check first 10 usages
+        assert isinstance(usage, dict), "Variable usage must be a dictionary"
+        assert "location" in usage, "Variable usage must have location field"
+        assert "context" in usage, "Variable usage must have context field"
+
+        # Validate usage location
+        location = usage["location"]
+        assert isinstance(location, dict), "Variable usage location must be a dictionary"
+        assert "line" in location, "Variable usage location must have line field"
+        assert isinstance(location["line"], int), f"Variable usage line must be integer, got {type(location['line'])}"
+        assert location["line"] > 0, f"Variable usage line must be positive, got {location['line']}"
+
+        # Validate usage context and detect patterns
+        context = usage["context"]
+        assert isinstance(context, str), f"Variable usage context must be string, got {type(context)}"
+        # Note: Context might be empty if not yet populated by the engine
+        if len(context.strip()) > 0:
+            assert "balances" in context, f"Variable usage context should mention 'balances', got: {context[:100]}..."
+        else:
+            print(f"Warning: Empty context found for variable usage at line {location['line']}")
+            continue  # Skip pattern detection for empty contexts
+
+        # Detect common variable usage patterns
+        if "balances[" in context:
+            usage_patterns.add("mapping_access")
+        if "balances =" in context or "balances+=" in context:
+            usage_patterns.add("assignment")
+        if "return balances" in context:
+            usage_patterns.add("return_value")
+
+    if usage_patterns:
+        print(f"✓ Found variable usage patterns: {sorted(usage_patterns)}")
+
+    print(f"✓ Validated {len(definitions)} variable definitions and {len(usages)} usages with detailed content checks")
 
 
 def test_96_contract_references(engine):
@@ -184,14 +268,28 @@ def test_99_nonexistent_target(engine):
     print("find_references(doesNotExist,function):", json.dumps(resp, indent=2))
     assert resp.get("success") is False
 
-    # Validate error response structure for nonexistent targets
+    # Validate comprehensive error response structure for nonexistent targets
+    assert "errors" in resp, "Error response must have errors field"
     errors = resp.get("errors")
-    assert errors is not None
-    assert len(errors) > 0
+    assert errors is not None, "Errors field must not be None"
+    assert isinstance(errors, list), f"Errors must be a list, got {type(errors)}"
+    assert len(errors) > 0, "Should have at least one error message"
 
-    # Error should indicate target not found
+    # Validate error content
     error_msg = str(errors[0]).lower()
-    assert "not found" in error_msg or "does not exist" in error_msg
+    assert "not found" in error_msg or "does not exist" in error_msg or "cannot find" in error_msg, f"Error message should indicate target not found, got: {error_msg}"
+
+    # Should include target name in error
+    assert "doesnotexist" in error_msg, f"Error should mention the target name, got: {error_msg}"
+
+    # Check that data field is present even on error (may be null)
+    assert "data" in resp, "Response should have data field even on error"
+    data = resp["data"]
+    # Data may be null on error, which is acceptable
+    if data is not None:
+        assert isinstance(data, dict), f"Data field should be a dictionary when not null, got {type(data)}"
+
+    print(f"✓ Validated proper error handling for nonexistent target with detailed error content")
 
 
 def test_100_target_types_coverage(engine):

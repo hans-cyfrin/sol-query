@@ -25,7 +25,7 @@ from sol_query.models.source_location import SourceLocation
 from sol_query.utils.pattern_matching import PatternMatcher
 from sol_query.analysis.call_analyzer import CallAnalyzer
 from sol_query.analysis.variable_tracker import VariableTracker
-from sol_query.utils.serialization import serialize_enum_value
+from sol_query.utils.serialization import serialize_enum_value, LLMSerializer
 
 
 class SolidityQueryEngineV2:
@@ -937,8 +937,8 @@ class SolidityQueryEngineV2:
             if "events" in include:
                 result_item["events"] = self._get_node_events(node)
 
-            if "modifiers" in include and hasattr(node, 'modifiers'):
-                result_item["modifiers"] = getattr(node, 'modifiers', [])
+            if "modifiers" in include:
+                result_item["modifiers"] = self._get_node_modifiers(node)
 
             if "natspec" in include:
                 result_item["natspec"] = self._get_node_natspec(node)
@@ -2958,6 +2958,28 @@ class SolidityQueryEngineV2:
 
         self._find_emit_statements_recursive(node.raw_node, events)
         return events
+
+    def _get_node_modifiers(self, node: ASTNode) -> List[Dict[str, Any]]:
+        """Get modifiers associated with a node in JSON-serializable format."""
+        modifiers = []
+
+        # Check if the node has modifiers attribute (e.g., FunctionDeclaration, ContractDeclaration)
+        if hasattr(node, 'modifiers') and node.modifiers:
+            # Initialize serializer for consistent formatting
+            serializer = LLMSerializer()
+
+            # Convert each modifier to a serializable dictionary
+            for modifier in node.modifiers:
+                if hasattr(modifier, 'name'):  # It's a ModifierDeclaration object
+                    modifier_dict = serializer._serialize_modifier_summary(modifier)
+                    modifiers.append(modifier_dict)
+                else:  # It might be a string or other simple type
+                    modifiers.append({
+                        "name": str(modifier),
+                        "parameter_count": 0
+                    })
+
+        return modifiers
 
     def _get_node_natspec(self, node: ASTNode) -> Dict[str, Any]:
         """Get NatSpec documentation for a node."""

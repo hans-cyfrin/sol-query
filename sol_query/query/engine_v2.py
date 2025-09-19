@@ -976,6 +976,20 @@ class SolidityQueryEngineV2:
 
         return elements
 
+    def _find_all_elements_by_identifiers(self, element_type: str, identifiers: List[str]) -> Dict[str, List[ASTNode]]:
+        """Find ALL elements by their identifiers (not just the best match)."""
+        elements = {}
+
+        # Get all nodes of the specified type
+        all_nodes = self._get_all_nodes_by_element_type(element_type)
+
+        # Match identifiers
+        for identifier in identifiers:
+            matching_nodes = self._find_all_matches(all_nodes, identifier, element_type)
+            elements[identifier] = matching_nodes
+
+        return elements
+
     def _get_all_nodes_by_element_type(self, element_type: str) -> List[ASTNode]:
         """Get all nodes of specified element type with caching."""
         # Check cache first
@@ -1049,6 +1063,57 @@ class SolidityQueryEngineV2:
                         return node
 
         return None
+
+    def _find_all_matches(self, nodes: List[ASTNode], identifier: str, element_type: str) -> List[ASTNode]:
+        """Find ALL matching nodes for an identifier (not just the best one)."""
+        matches = []
+
+        # Try exact name match first
+        for node in nodes:
+            if hasattr(node, 'name') and node.name == identifier:
+                matches.append(node)
+
+        # If exact matches found, return them
+        if matches:
+            return matches
+
+        # Try signature match for functions
+        if element_type == "function":
+            for node in nodes:
+                if self._matches_function_signature(node, identifier):
+                    matches.append(node)
+
+        # If signature matches found, return them
+        if matches:
+            return matches
+
+        # Try contract.element format
+        if '.' in identifier:
+            parts = identifier.split('.', 1)
+            if len(parts) == 2:
+                contract_name, element_name = parts
+                for node in nodes:
+                    if (hasattr(node, 'parent_contract') and
+                        hasattr(node.parent_contract, 'name') and
+                        node.parent_contract.name == contract_name and
+                        hasattr(node, 'name') and node.name == element_name):
+                        matches.append(node)
+
+        # If contract.element matches found, return them
+        if matches:
+            return matches
+
+        # Try file:contract format for contracts
+        if element_type == "contract" and ':' in identifier:
+            parts = identifier.split(':')
+            if len(parts) == 2:
+                file_path, contract_name = parts
+                for node in nodes:
+                    if (hasattr(node, 'name') and node.name == contract_name and
+                        hasattr(node, 'file_path') and file_path in str(node.file_path)):
+                        matches.append(node)
+
+        return matches
 
     def _matches_function_signature(self, node: ASTNode, signature: str) -> bool:
         """Check if node matches function signature."""
@@ -1195,6 +1260,37 @@ class SolidityQueryEngineV2:
 
         return element
 
+    def _find_all_target_elements(self, target: str, target_type: str) -> List[ASTNode]:
+        """Find ALL matching target elements for reference analysis (not just the first)."""
+        # Handle special target types that don't have direct AST nodes
+        if target_type in ["statement", "expression", "type"]:
+            synthetic = self._create_synthetic_element(target, target_type)
+            return [synthetic] if synthetic else []
+
+        # Find all matching elements instead of just the best match
+        all_elements = self._find_all_elements_by_identifiers(target_type, [target])
+        elements = all_elements.get(target, [])
+
+        # If not found, try related element types for common naming patterns
+        if not elements:
+            if target_type == "variable":
+                # Try as function (for getter functions like totalSupply)
+                func_elements = self._find_all_elements_by_identifiers("function", [target])
+                elements = func_elements.get(target, [])
+
+                # Try with underscore prefix (for private variables like _totalSupply)
+                if not elements:
+                    private_name = f"_{target}"
+                    var_elements = self._find_all_elements_by_identifiers("variable", [private_name])
+                    elements = var_elements.get(private_name, [])
+
+            elif target_type == "function":
+                # Try as variable (for state variables)
+                var_elements = self._find_all_elements_by_identifiers("variable", [target])
+                elements = var_elements.get(target, [])
+
+        return elements
+
     def _create_synthetic_element(self, target: str, target_type: str):
         """Create a synthetic element for special target types."""
         # Create a simple object with the necessary attributes
@@ -1274,7 +1370,10 @@ class SolidityQueryEngineV2:
 
         # Find definitions
         if reference_type in ["all", "definitions"]:
-            definitions = self._find_element_definitions(target_element, direction, max_depth, actual_filters)
+            # Use the improved method to find ALL definitions, not just one
+            element_name = getattr(target_element, 'name', '')
+            element_type_str = self._get_user_friendly_type(type(target_element).__name__)
+            definitions = self._find_all_element_definitions(element_name, element_type_str, direction, max_depth, actual_filters)
             references["definitions"] = definitions
 
         # Build call chains if requested
@@ -1396,7 +1495,7 @@ class SolidityQueryEngineV2:
         usages = []
         function_name = getattr(function, 'name', '')
 
-        # Use the existing query_code method to find function calls
+        # Approach 1: Use the existing query_code method to find function calls
         try:
             # Get all calls in the codebase using the query engine
             calls_resp = self.query_code('calls')
@@ -1425,10 +1524,125 @@ class SolidityQueryEngineV2:
                         if self._usage_passes_filters(usage_info, filters):
                             usages.append(usage_info)
         except Exception as e:
-            # Fallback to simpler analysis if call analyzer fails
-            usages.extend(self._find_generic_usages(function, direction, max_depth, filters))
+            self.logger.warning(f"Query-based call detection failed: {e}")
+
+        # Approach 2: Direct AST-based search for function calls
+        try:
+            usages.extend(self._find_function_calls_in_ast(function_name, filters))
+        except Exception as e:
+            self.logger.warning(f"AST-based call detection failed: {e}")
+
+        # Approach 3: Fallback to generic usage analysis
+        if not usages:
+            try:
+                usages.extend(self._find_generic_usages(function, direction, max_depth, filters))
+            except Exception as e:
+                self.logger.warning(f"Generic usage detection failed: {e}")
 
         return usages
+
+    def _find_function_calls_in_ast(self, function_name: str, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find function calls by searching AST nodes directly."""
+        usages = []
+
+        # Get all AST nodes
+        all_nodes = self._get_all_nodes()
+
+        # Look for call expressions and function calls
+        for node in all_nodes:
+            try:
+                # Check if this node represents a function call
+                if self._is_function_call_node(node, function_name):
+                    location_data = self._get_node_location(node)
+
+                    # Get source code context
+                    context = getattr(node, 'source_code', '') or self._get_node_source_context(node)
+
+                    usage_info = {
+                        "location": location_data,
+                        "usage_type": "function_call",
+                        "context": context,
+                        "node_type": "call_expression",
+                        "element_name": function_name,
+                        "source_snippet": context[:200] + "..." if len(context) > 200 else context,
+                        "line_content": self._get_full_line_content(location_data)
+                    }
+
+                    if self._usage_passes_filters(usage_info, filters):
+                        usages.append(usage_info)
+
+            except Exception as e:
+                # Continue processing other nodes even if one fails
+                continue
+
+        return usages
+
+    def _is_function_call_node(self, node: ASTNode, function_name: str) -> bool:
+        """Check if an AST node represents a call to the given function."""
+        # Check various ways a function call might be represented
+
+        # First, ensure this is not a function declaration itself
+        if isinstance(node, FunctionDeclaration) and getattr(node, 'name', None) == function_name:
+            return False  # Don't match function declarations
+
+        # Check if node has a name attribute that matches
+        if hasattr(node, 'name') and getattr(node, 'name') == function_name:
+            # Check if this is a call context (not just a definition)
+            source = getattr(node, 'source_code', '') or self._get_node_source_context(node)
+            if source and '(' in source and ')' in source:
+                # Additional check: make sure it's not just a parameter or variable declaration
+                if not any(keyword in source.lower() for keyword in ['function ', 'modifier ', 'event ', 'struct ', 'enum ']):
+                    return True
+
+        # Check if node represents a call expression
+        if hasattr(node, 'node_type'):
+            node_type = str(getattr(node, 'node_type', '')).lower()
+            if 'call' in node_type:
+                # Check if the call target matches our function name
+                source = getattr(node, 'source_code', '') or self._get_node_source_context(node)
+                if source and function_name in source and '(' in source:
+                    return True
+
+        # Check source code content for function calls
+        source = getattr(node, 'source_code', '') or self._get_node_source_context(node)
+        if source:
+            # Look for patterns like "functionName(" or "this.functionName(" etc.
+            import re
+            # Match function call patterns, but be more strict
+            patterns = [
+                rf'\b{re.escape(function_name)}\s*\(',  # functionName(
+                rf'\.{re.escape(function_name)}\s*\(',  # .functionName(
+                rf'->{re.escape(function_name)}\s*\(',  # ->functionName(
+            ]
+
+            for pattern in patterns:
+                if re.search(pattern, source):
+                    # Additional validation: make sure this is not a function declaration line
+                    if not re.search(rf'\bfunction\s+{re.escape(function_name)}\s*\(', source):
+                        return True
+
+        return False
+
+    def _get_node_source_context(self, node: ASTNode) -> str:
+        """Get source code context for a node."""
+        if hasattr(node, 'source_location') and node.source_location:
+            try:
+                # Try to read from the source file
+                file_path = getattr(node.source_location, 'file_path', None)
+                line_start = getattr(node.source_location, 'line_start', None)
+                line_end = getattr(node.source_location, 'line_end', None)
+
+                if file_path and line_start:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        if line_end and line_end <= len(lines):
+                            return ''.join(lines[line_start-1:line_end])
+                        elif line_start <= len(lines):
+                            return lines[line_start-1].strip()
+            except Exception:
+                pass
+
+        return ''
 
     def _find_variable_usages(self, variable: VariableDeclaration, direction: str, max_depth: int, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Find usages of a variable (reads/writes)."""
@@ -1556,7 +1770,10 @@ class SolidityQueryEngineV2:
         usages = []
         element_name = getattr(element, 'name', '')
 
-        # Search in all relevant nodes
+        if not element_name:
+            return usages
+
+        # Approach 1: Search in all relevant nodes
         search_nodes = self._get_search_nodes_by_direction(element, direction)
 
         for node in search_nodes:
@@ -1571,7 +1788,140 @@ class SolidityQueryEngineV2:
                 if len(usages) >= 50:
                     break
 
+        # Approach 2: Enhanced text-based search across all source files
+        if len(usages) < 10:  # Only do expensive search if we haven't found many usages
+            usages.extend(self._find_text_based_usages(element_name, element, filters))
+
         return usages
+
+    def _find_text_based_usages(self, element_name: str, element: ASTNode, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find usages by searching text in all source files."""
+        usages = []
+
+        try:
+            # Get all source files
+            contracts = self.source_manager.get_contracts()
+            file_paths = set()
+
+            for contract in contracts:
+                if hasattr(contract, 'source_location') and contract.source_location:
+                    file_path = getattr(contract.source_location, 'file_path', None)
+                    if file_path:
+                        file_paths.add(file_path)
+
+            import re
+            # Create patterns to search for
+            patterns = [
+                rf'\b{re.escape(element_name)}\s*\(',  # Function calls
+                rf'\b{re.escape(element_name)}\s*[^(]',  # Variable references
+                rf'\.{re.escape(element_name)}\b',  # Member access
+                rf'\b{re.escape(element_name)}\s*=',  # Assignments
+                rf'=\s*{re.escape(element_name)}\b',  # Value assignments
+            ]
+
+            for file_path in file_paths:
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+
+                    for line_num, line in enumerate(lines, 1):
+                        for pattern in patterns:
+                            if re.search(pattern, line):
+                                # Don't include the definition line itself
+                                if hasattr(element, 'source_location') and element.source_location:
+                                    element_line = getattr(element.source_location, 'line_start', None)
+                                    element_file = getattr(element.source_location, 'file_path', None)
+                                    if (element_line == line_num and
+                                        element_file and str(element_file) == str(file_path)):
+                                        continue
+
+                                # Create usage info
+                                usage_info = {
+                                    "location": {
+                                        "file": str(file_path),
+                                        "line": line_num,
+                                        "column": line.find(element_name) + 1,
+                                        "contract": self._get_contract_for_file_line(file_path, line_num),
+                                        "function": self._get_function_for_file_line(file_path, line_num)
+                                    },
+                                    "usage_type": self._infer_usage_type(line, element_name),
+                                    "context": line.strip(),
+                                    "node_type": "text_reference",
+                                    "element_name": element_name,
+                                    "source_snippet": line.strip(),
+                                    "line_content": line.strip()
+                                }
+
+                                if self._usage_passes_filters(usage_info, filters):
+                                    usages.append(usage_info)
+                                    if len(usages) >= 20:  # Limit text-based results
+                                        return usages
+
+                except Exception as e:
+                    # Continue with other files even if one fails
+                    continue
+
+        except Exception as e:
+            self.logger.warning(f"Text-based search failed: {e}")
+
+        return usages
+
+    def _infer_usage_type(self, line: str, element_name: str) -> str:
+        """Infer the type of usage based on the line content."""
+        line_lower = line.lower().strip()
+
+        if f'{element_name}(' in line:
+            return "function_call"
+        elif f'{element_name} =' in line or f'= {element_name}' in line:
+            return "assignment"
+        elif f'.{element_name}' in line:
+            return "member_access"
+        elif 'return' in line_lower and element_name in line:
+            return "return_value"
+        elif any(keyword in line_lower for keyword in ['require', 'assert', 'if', 'while']):
+            return "condition"
+        else:
+            return "reference"
+
+    def _get_contract_for_file_line(self, file_path, line_num: int) -> str:
+        """Get the contract name for a given file and line."""
+        try:
+            contracts = self.source_manager.get_contracts()
+            for contract in contracts:
+                if (hasattr(contract, 'source_location') and
+                    contract.source_location and
+                    hasattr(contract.source_location, 'file_path') and
+                    str(contract.source_location.file_path) == str(file_path)):
+
+                    start_line = getattr(contract.source_location, 'line_start', 1)
+                    end_line = getattr(contract.source_location, 'line_end', float('inf'))
+
+                    if start_line <= line_num <= end_line:
+                        return getattr(contract, 'name', '')
+        except Exception:
+            pass
+        return ""
+
+    def _get_function_for_file_line(self, file_path, line_num: int) -> str:
+        """Get the function name for a given file and line."""
+        try:
+            all_nodes = self._get_all_nodes()
+            functions = [node for node in all_nodes if isinstance(node, FunctionDeclaration)]
+
+            for function in functions:
+                if (hasattr(function, 'source_location') and
+                    function.source_location and
+                    hasattr(function.source_location, 'file_path') and
+                    str(function.source_location.file_path) == str(file_path)):
+
+                    start_line = getattr(function.source_location, 'line_start', 1)
+                    end_line = getattr(function.source_location, 'line_end', float('inf'))
+
+                    if start_line <= line_num <= end_line:
+                        return getattr(function, 'name', '')
+        except Exception:
+            pass
+        return ""
 
     def _usage_passes_filters(self, usage_info: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         """Check if usage passes the provided filters."""
@@ -1668,6 +2018,25 @@ class SolidityQueryEngineV2:
                     definitions.append(interface_def_dict)
 
         return definitions
+
+    def _find_all_element_definitions(self, target: str, target_type: str, _direction: str, _max_depth: int, _filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find ALL definitions of an element across the entire codebase."""
+        all_definitions = []
+
+        # Find all matching elements with the same name
+        all_matching_elements = self._find_all_target_elements(target, target_type)
+
+        for element in all_matching_elements:
+            # Get definitions for each matching element
+            element_definitions = self._find_element_definitions(element, _direction, _max_depth, _filters)
+
+            # Mark additional definitions beyond the first as "additional" instead of "primary"
+            for i, definition in enumerate(element_definitions):
+                if len(all_definitions) > 0 and definition.get("definition_type") == "primary":
+                    definition["definition_type"] = "additional"
+                all_definitions.append(definition)
+
+        return all_definitions
 
     def _find_function_overrides(self, function: FunctionDeclaration) -> List[FunctionDeclaration]:
         """Find functions that override the given function."""
@@ -1782,6 +2151,9 @@ class SolidityQueryEngineV2:
             if parent_func and getattr(parent_func, 'parent_contract', None):
                 contract_name = getattr(parent_func.parent_contract, 'name', None)
 
+        # Determine containing function
+        function_name = self._find_containing_function(node)
+
         # Use SourceLocation when available
         file_path = None
         line = None
@@ -1799,8 +2171,60 @@ class SolidityQueryEngineV2:
             "file": str(file_path) if file_path is not None else None,
             "line": line,
             "column": column,
-            "contract": contract_name
+            "contract": contract_name,
+            "function": function_name
         }
+
+    def _find_containing_function(self, node: ASTNode) -> Optional[str]:
+        """Find the name of the function containing this node."""
+        # For nodes that already have parent_function reference
+        if hasattr(node, 'parent_function') and getattr(node, 'parent_function', None):
+            parent_func = getattr(node, 'parent_function', None)
+            # If parent_func is already a string (like in CallNode), return it directly
+            if isinstance(parent_func, str):
+                return parent_func
+            # If it's an object, get the name attribute
+            return getattr(parent_func, 'name', None)
+
+        # For nodes with source location, find containing function by location
+        if hasattr(node, 'source_location') and getattr(node, 'source_location', None):
+            try:
+                node_loc = node.source_location
+                # Get all functions and check if this node falls within any function's range
+                all_functions = self._get_all_functions()
+                for func in all_functions:
+                    if (hasattr(func, 'source_location') and func.source_location and
+                        func.source_location.file_path == node_loc.file_path):
+                        # Check if node is within function bounds (using byte positions for accuracy)
+                        if (hasattr(func.source_location, 'start_byte') and
+                            hasattr(func.source_location, 'end_byte') and
+                            hasattr(node_loc, 'start_byte')):
+                            if (func.source_location.start_byte <= node_loc.start_byte <= func.source_location.end_byte):
+                                return func.name
+                        # Fallback to line-based comparison if byte positions unavailable
+                        elif (hasattr(func.source_location, 'start_line') and
+                              hasattr(func.source_location, 'end_line') and
+                              hasattr(node_loc, 'start_line')):
+                            if (func.source_location.start_line <= node_loc.start_line <= func.source_location.end_line):
+                                return func.name
+            except Exception:
+                # If anything goes wrong with the heuristic, continue
+                pass
+
+        return None
+
+    def _get_all_functions(self) -> List[FunctionDeclaration]:
+        """Get all function declarations from all contracts."""
+        functions = []
+        try:
+            for source_file in self.source_manager.get_all_files():
+                if source_file.ast:
+                    for node in source_file.ast:
+                        if isinstance(node, ContractDeclaration):
+                            functions.extend(node.functions)
+        except Exception:
+            pass
+        return functions
 
     def _get_analysis_scope(self, scope: Dict[str, Any]) -> Dict[str, Any]:
         """Get the actual analysis scope used."""
@@ -2339,10 +2763,15 @@ class SolidityQueryEngineV2:
             # Determine call type based on the function name/structure
             call_type = self._classify_call_type(call_name, function_node)
 
+            # Get line and column information
+            start_point = ts_node.start_point
+
             return {
                 'name': call_name,
                 'type': call_type,
                 'position': function_node.start_byte,
+                'line': start_point[0] + 1,  # Convert 0-based to 1-based
+                'column': start_point[1],
                 'arguments_count': self._count_call_arguments(ts_node)
             }
 

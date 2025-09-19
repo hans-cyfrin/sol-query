@@ -15,12 +15,12 @@ def test_21_state_variables_only(engine):
     assert value_var is not None
     assert value_var.get("is_state_variable") is True
     assert str(value_var.get("type_name")).lower() == "uint256"
-    assert value_var.get("location", {}).get("line") == 8
+    assert value_var.get("location", {}).get("line") == 8  # Engine reports the correct line 8
 
     assert owner_var is not None
     assert owner_var.get("is_state_variable") is True
     assert str(owner_var.get("type_name")).lower() == "address"
-    assert owner_var.get("location", {}).get("line") == 9
+    assert owner_var.get("location", {}).get("line") == 9  # Engine reports the correct line 9
 
 
 def test_22_statements_by_type(engine):
@@ -40,7 +40,7 @@ def test_22_statements_by_type(engine):
         assert file_path.endswith("SimpleContract.sol")
 
         # Should be the require statement at line 12 (in onlyOwner modifier)
-        assert location.get("line") == 12
+        assert location.get("line") == 12  # Engine reports the correct line 12
         assert location.get("column") == 8  # Column position of require
 
         # Note: For statements, name and contract may be None as they represent code fragments
@@ -84,7 +84,7 @@ def test_24_functions_that_change_state(engine):
     assert set_value_func.get("type") == "function"
     assert str(set_value_func.get("visibility")).lower() == "public"
     assert str(set_value_func.get("state_mutability")).lower() == "nonpayable"
-    assert set_value_func.get("location", {}).get("line") == 32
+    assert set_value_func.get("location", {}).get("line") == 32  # Engine reports the correct line 32
     assert str(set_value_func.get("location", {}).get("file")).endswith("SimpleContract.sol")
 
 
@@ -129,7 +129,7 @@ def test_27_payable_functions(engine):
         deposit_func = payable_functions["deposit"]
         assert str(deposit_func.get("state_mutability")).lower() == "payable"
         assert str(deposit_func.get("location", {}).get("file")).endswith("SimpleContract.sol")
-        assert deposit_func.get("location", {}).get("line") == 37
+        assert deposit_func.get("location", {}).get("line") == 37  # Engine reports the correct line 37
 
     if "mint" in payable_functions:
         mint_func = payable_functions["mint"]

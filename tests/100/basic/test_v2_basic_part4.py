@@ -21,7 +21,7 @@ def test_61_function_basic_info(engine):
     # Should find mint from ERC721WithImports.sol (first match)
     location = bi.get("location", {})
     assert str(location.get("file")).endswith("ERC721WithImports.sol")
-    assert location.get("line") == 34  # Line number in ERC721WithImports.sol
+    assert location.get("line") == 34  # Engine reports the correct line 34
     assert location.get("column") == 5
     assert location.get("contract") == "ERC721WithImports"
 
@@ -122,7 +122,7 @@ def test_64_contract_basic_info(engine):
 
     location = bi.get("location", {})
     assert str(location.get("file")).endswith("MultipleInheritance.sol")
-    assert location.get("line") == 54  # Contract starts at line 54
+    assert location.get("line") == 54  # Engine reports the correct line 54
     assert location.get("column") == 1
     assert location.get("contract") == "MultiInheritanceToken"
 
@@ -160,7 +160,7 @@ def test_67_variable_details(engine):
     # Should find totalSupply from MultipleInheritance.sol (BaseToken contract)
     location = bi.get("location", {})
     assert str(location.get("file")).endswith("MultipleInheritance.sol")
-    assert location.get("line") == 9  # totalSupply at line 9 in BaseToken
+    assert location.get("line") == 9  # Engine reports the correct line 9
 
 
 def test_68_modifier_details(engine):
@@ -179,7 +179,7 @@ def test_68_modifier_details(engine):
     # Should find onlyOwner from MultipleInheritance.sol (Ownable contract)
     location = bi.get("location", {})
     assert str(location.get("file")).endswith("MultipleInheritance.sol")
-    assert location.get("line") == 39  # onlyOwner modifier at line 39
+    assert location.get("line") == 39  # Engine reports the correct line 39
 
     # Validate detailed_info
     assert "detailed_info" in el
@@ -200,7 +200,7 @@ def test_69_event_details(engine):
 
     location = bi.get("location", {})
     assert str(location.get("file")).endswith("ERC721WithImports.sol")
-    assert location.get("line") == 23  # TokenMinted event at line 23
+    assert location.get("line") == 23  # Engine reports the correct line 23
 
 
 def test_70_error_details(engine):
@@ -218,7 +218,7 @@ def test_70_error_details(engine):
 
     location = bi.get("location", {})
     assert str(location.get("file")).endswith("sample_contract.sol")
-    assert location.get("line") == 28  # InsufficientBalance error at line 28
+    assert location.get("line") == 28  # Engine reports the correct line 28
 
 
 def test_71_struct_details(engine):

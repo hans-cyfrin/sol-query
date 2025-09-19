@@ -190,6 +190,34 @@ class ASTBuilder:
         """Get the text content of a tree-sitter node."""
         return self.source_code[node.start_byte:node.end_byte]
 
+    def _get_node_text_by_points(self, node: tree_sitter.Node) -> str:
+        """Get node text using line/column positions (fallback for byte encoding issues)."""
+        lines = self.source_code.split('\n')
+        start_line = node.start_point.row
+        start_col = node.start_point.column
+        end_line = node.end_point.row
+        end_col = node.end_point.column
+
+        if start_line == end_line:
+            # Single line
+            if start_line < len(lines):
+                return lines[start_line][start_col:end_col]
+            return ""
+        else:
+            # Multi-line
+            result_lines = []
+            if start_line < len(lines):
+                result_lines.append(lines[start_line][start_col:])
+
+            for line_idx in range(start_line + 1, end_line):
+                if line_idx < len(lines):
+                    result_lines.append(lines[line_idx])
+
+            if end_line < len(lines):
+                result_lines.append(lines[end_line][:end_col])
+
+            return '\n'.join(result_lines)
+
     def _find_child_by_type(self, node: tree_sitter.Node, node_type: str) -> Optional[tree_sitter.Node]:
         """Find the first child node of a specific type."""
         for child in node.children:

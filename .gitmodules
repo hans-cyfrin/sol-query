@@ -1,3 +1,6 @@
 [submodule "sol-bug-bench"]
 	path = tests/fixtures/sol-bug-bench
 	url = https://github.com/hans-cyfrin/sol-bug-bench
+[submodule "compound-protocol"]
+	path = tests/fixtures/compound-protocol
+	url = https://github.com/compound-finance/compound-protocol.git

@@ -593,17 +593,34 @@ class CallAnalyzer:
 
         return context
 
-    def build_contract_context(self, contract, all_contracts: List) -> Dict:
+    def build_contract_context(self, contract, all_contracts: List, visited: set = None) -> Dict:
         """
         Build comprehensive contract context for accurate call analysis.
         
         Args:
             contract: The current contract being analyzed
             all_contracts: All contracts in the codebase
+            visited: Set of already visited contract names to prevent circular inheritance
             
         Returns:
             Comprehensive context dictionary
         """
+        if visited is None:
+            visited = set()
+
+        # Prevent circular inheritance issues
+        if contract.name in visited:
+            return {
+                'contract_functions': set(),
+                'inherited_functions': set(),
+                'contract_variables': set(),
+                'contract_name': contract.name,
+                'is_interface_call': lambda target: self._looks_like_interface_call(target),
+                'is_low_level_call': lambda target: target in ['call', 'delegatecall', 'staticcall']
+            }
+
+        visited.add(contract.name)
+
         context = {
             'contract_functions': set(),
             'inherited_functions': set(),
@@ -620,10 +637,10 @@ class CallAnalyzer:
         # Add inherited functions
         for base_name in contract.inheritance:
             base_contract = self._find_contract_by_name(base_name, all_contracts)
-            if base_contract:
+            if base_contract and base_contract.name not in visited:
                 context['inherited_functions'].update(f.name for f in base_contract.functions)
                 # Recursively add inherited functions from base contracts
-                base_context = self.build_contract_context(base_contract, all_contracts)
+                base_context = self.build_contract_context(base_contract, all_contracts, visited.copy())
                 context['inherited_functions'].update(base_context['inherited_functions'])
 
         return context

@@ -1,6 +1,7 @@
 """AST builder that converts tree-sitter nodes to our AST representation."""
 
 import logging
+import re
 from typing import Dict, List, Optional, Union, Any
 
 import tree_sitter
@@ -229,8 +230,12 @@ class ASTBuilder:
         """Find all child nodes of a specific type."""
         return [child for child in node.children if child.type == node_type]
 
-    def _build_contract(self, node: tree_sitter.Node) -> ContractDeclaration:
+    def _build_contract(self, node: tree_sitter.Node) -> Optional[ContractDeclaration]:
         """Build a contract declaration."""
+        # First, validate that this is actually a contract declaration
+        if not self._is_valid_contract_node(node):
+            return None
+
         # Determine contract kind
         kind_map = {
             "contract_declaration": "contract",
@@ -291,8 +296,12 @@ class ASTBuilder:
 
         return contract
 
-    def _build_function(self, node: tree_sitter.Node) -> FunctionDeclaration:
+    def _build_function(self, node: tree_sitter.Node) -> Optional[FunctionDeclaration]:
         """Build a function declaration."""
+        # First, validate that this is actually a function declaration
+        if not self._is_valid_function_node(node):
+            return None
+
         # Get function name
         if node.type == "constructor_definition":
             name = "constructor"
@@ -447,8 +456,12 @@ class ASTBuilder:
             initial_value=initial_value
         )
 
-    def _build_modifier(self, node: tree_sitter.Node) -> ModifierDeclaration:
+    def _build_modifier(self, node: tree_sitter.Node) -> Optional[ModifierDeclaration]:
         """Build a modifier declaration."""
+        # First, validate that this is actually a modifier declaration
+        if not self._is_valid_modifier_node(node):
+            return None
+
         # Get modifier name
         name_node = self._find_child_by_type(node, "identifier")
         name = self._get_node_text(name_node) if name_node else "unknown"
@@ -1388,3 +1401,273 @@ class ASTBuilder:
             raw_node=node,
             name=type_text if type_text else "unknown_type"
         )
+
+    def _is_valid_function_node(self, node: tree_sitter.Node) -> bool:
+        """
+        Validate that a tree-sitter node identified as function_definition 
+        is actually a valid function declaration.
+        
+        This is needed because tree-sitter-solidity sometimes incorrectly
+        identifies comments and other text as function definitions.
+        """
+        # Get the full text of the node
+        node_text = self._get_node_text(node)
+
+        # Basic text validation
+        if not node_text or len(node_text.strip()) < 10:
+            return False
+
+        # Check for obvious non-function patterns
+        # Comments that got misidentified
+        if node_text.strip().startswith('/**') or node_text.strip().startswith('/*'):
+            return False
+        if node_text.strip().startswith('*') or node_text.strip().startswith('*/'):
+            return False
+
+        # Must contain function-like keywords unless it's a constructor
+        if node.type == "constructor_definition":
+            return True
+
+        # Text that looks like comments or documentation (only for non-constructors)
+        if node_text.count('*') > node_text.count('function') * 3:
+            return False
+
+        # Check if it looks like a variable declaration or constant
+        if node_text.strip().startswith('uint256 private constant'):
+            return False
+        if 'private constant' in node_text and 'function' not in node_text:
+            return False
+
+        # For function_definition nodes, we expect certain patterns
+        text_lower = node_text.lower()
+
+        # Must have function keyword, receive, or fallback
+        if not any(keyword in text_lower for keyword in ['function', 'receive', 'fallback']):
+            return False
+
+        # Should not be primarily a comment (more than 50% comment markers)
+        comment_chars = node_text.count('*') + node_text.count('//')
+        total_chars = len(node_text)
+        if comment_chars > total_chars * 0.3:  # More than 30% comment characters
+            return False
+
+        # Check for required structural elements
+        # A function should have an identifier child (function name)
+        if node.type == "function_definition":
+            name_node = self._find_child_by_type(node, "identifier")
+            if not name_node:
+                return False
+
+            name = self._get_node_text(name_node)
+            if not name or len(name.strip()) == 0:
+                return False
+
+            # Function name should be reasonable
+            if len(name) > 100 or '\n' in name or name.count(' ') > 2:
+                return False
+
+            # Reject names that are clearly not function names
+            if name.strip().startswith(' ') or name.strip().endswith(' '):
+                return False
+
+            # Reject names that contain spaces (function names shouldn't have spaces)
+            if ' ' in name:
+                return False
+
+            # Reject names that look like sentence fragments or natural language
+            if not self._is_valid_solidity_identifier(name):
+                return False
+
+            # Function names should be valid identifiers (alphanumeric + underscore)
+            # Allow dollar sign for some edge cases
+            if not all(c.isalnum() or c in '_$' for c in name.strip()):
+                return False
+
+            # Should start with letter or underscore
+            clean_name = name.strip()
+            if clean_name and not (clean_name[0].isalpha() or clean_name[0] == '_'):
+                return False
+
+        return True
+
+    def _is_valid_solidity_identifier(self, name: str) -> bool:
+        """
+        Validate that a string is a valid Solidity identifier and not garbage text.
+        
+        This uses pattern matching to detect common issues like:
+        - Natural language fragments
+        - Sentence-like structures
+        - Common English words that shouldn't be identifiers
+        - File path fragments or other non-code text
+        """
+        if not name or not isinstance(name, str):
+            return False
+
+        # Reject names that start or end with whitespace (before stripping)
+        if name != name.strip():
+            return False
+
+        name = name.strip()
+
+        # Basic length and format checks
+        if len(name) == 0 or len(name) > 100:
+            return False
+
+        # Reject names with line breaks
+        if '\n' in name or '\r' in name:
+            return False
+
+        # Solidity identifier validation - use actual language rules
+
+        # 1. Must contain only valid identifier characters
+        if not re.match(r'^[a-zA-Z_$][a-zA-Z0-9_$]*$', name):
+            return False
+
+        # 2. Check for obvious non-identifier characteristics
+
+        # Contains spaces = not an identifier
+        if ' ' in name:
+            return False
+
+        # Multiple words separated by anything other than camelCase = likely sentence
+        # Count distinct word boundaries (spaces, punctuation, etc)
+        word_separators = re.findall(r'[\s\-\.@#\*/]+', name)
+        if len(word_separators) > 0:
+            return False
+
+        # Looks like English text rather than code:
+        # - Has 3+ consecutive lowercase letters followed by 3+ more (sentence pattern)
+        # - This catches "mount is calculate", "rom the prov", etc. without hardcoding
+        if re.search(r'[a-z]{3,}\s+[a-z]{3,}', name, re.IGNORECASE):
+            return False
+
+        # Very short fragments (1-2 chars) are usually garbage unless they're common patterns
+        if len(name) <= 2:
+            # Allow common short identifiers: a, b, x, y, i, j, _
+            if name.lower() not in ['a', 'b', 'c', 'x', 'y', 'z', 'i', 'j', 'k', 'n', 'm', '_']:
+                return False
+
+        # Obvious comment or documentation remnants
+        if any(marker in name for marker in ['*', '/', '@', '#']):
+            return False
+
+        return True
+
+    def _is_valid_contract_node(self, node: tree_sitter.Node) -> bool:
+        """
+        Validate that a tree-sitter node identified as contract_declaration 
+        is actually a valid contract declaration.
+        
+        This is a lightweight validation focused on filtering out obvious garbage
+        while preserving all legitimate contracts.
+        """
+        # Get the full text of the node
+        node_text = self._get_node_text(node)
+
+        # Basic text validation
+        if not node_text or len(node_text.strip()) < 5:
+            return False
+
+        # Check for obvious non-contract patterns - be very conservative
+        # Only reject clear garbage that we saw in lambowin
+        if node_text.strip().startswith('/**') or node_text.strip().startswith('/*'):
+            return False
+        if node_text.strip().startswith('*') or node_text.strip().startswith('*/'):
+            return False
+        if node_text.strip().startswith('//'):
+            return False
+
+        # If it's mostly comments (more than 50% comment chars), reject
+        comment_chars = node_text.count('*') + node_text.count('//')
+        total_chars = len(node_text)
+        if total_chars > 0 and comment_chars > total_chars * 0.5:
+            return False
+
+        # Check for required structural elements
+        name_node = self._find_child_by_type(node, "identifier")
+        if not name_node:
+            return False
+
+        name = self._get_node_text(name_node)
+        if not name or len(name.strip()) == 0:
+            return False
+
+        # Only reject obviously broken names, be very permissive
+        clean_name = name.strip()
+
+        # Reject names with newlines or excessive spaces
+        if '\n' in clean_name or clean_name.count(' ') > 2:
+            return False
+
+        # Reject names that look like garbage using pattern matching
+        if not self._is_valid_solidity_identifier(clean_name):
+            return False
+
+        # If it's super short and looks like a fragment, reject it
+        if len(clean_name) < 3 and not clean_name.isalpha():
+            return False
+
+        return True
+
+    def _is_valid_modifier_node(self, node: tree_sitter.Node) -> bool:
+        """
+        Validate that a tree-sitter node identified as modifier_definition 
+        is actually a valid modifier declaration.
+        """
+        # Get the full text of the node
+        node_text = self._get_node_text(node)
+
+        # Basic text validation
+        if not node_text or len(node_text.strip()) < 8:  # "modifier" is 8 chars
+            return False
+
+        # Check for obvious non-modifier patterns
+        if node_text.strip().startswith('/**') or node_text.strip().startswith('/*'):
+            return False
+        if node_text.strip().startswith('*') or node_text.strip().startswith('*/'):
+            return False
+        if node_text.strip().startswith('//'):
+            return False
+
+        # Must contain modifier keyword
+        text_lower = node_text.lower()
+        if 'modifier' not in text_lower:
+            return False
+
+        # Should not be primarily a comment
+        comment_chars = node_text.count('*') + node_text.count('//')
+        total_chars = len(node_text)
+        if comment_chars > total_chars * 0.3:
+            return False
+
+        # Check for required structural elements
+        name_node = self._find_child_by_type(node, "identifier")
+        if not name_node:
+            return False
+
+        name = self._get_node_text(name_node)
+        if not name or len(name.strip()) == 0:
+            return False
+
+        # Modifier name should be reasonable
+        if len(name) > 100 or '\n' in name:
+            return False
+
+        # Reject names that contain spaces or invalid characters
+        if ' ' in name or any(char in name for char in ['*', '/', '{', '}', '(', ')', '-']):
+            return False
+
+        # Modifier names should be valid identifiers
+        if not all(c.isalnum() or c in '_$' for c in name.strip()):
+            return False
+
+        # Should start with letter or underscore
+        clean_name = name.strip()
+        if clean_name and not (clean_name[0].isalpha() or clean_name[0] == '_'):
+            return False
+
+        # Reject obviously invalid names
+        if clean_name in ['unknown', 'Unknown']:
+            return False
+
+        return True

@@ -65,6 +65,9 @@ class SourceManager:
         self.dependency_graph: Dict[Path, Set[Path]] = {}
         self.reverse_dependencies: Dict[Path, Set[Path]] = {}
 
+        # Performance optimization
+        self._needs_contextual_analysis = False
+
         # Caching
         self.enable_cache = True
 
@@ -117,8 +120,9 @@ class SourceManager:
         # Store in cache
         self.files[path] = source_file
 
-        # Perform contextual analysis to classify call expressions
-        self._perform_contextual_analysis()
+        # Mark that we need to run contextual analysis
+        # (will be done in batch after all files are loaded for performance)
+        self._needs_contextual_analysis = True
 
         return source_file
 
@@ -189,16 +193,25 @@ class SourceManager:
         """Get all loaded source files."""
         return list(self.files.values())
 
+    def ensure_contextual_analysis(self) -> None:
+        """Ensure contextual analysis has been performed if needed."""
+        if self._needs_contextual_analysis:
+            self._perform_contextual_analysis()
+            self._needs_contextual_analysis = False
+
     def get_contracts(self, file_path: Optional[Union[str, Path]] = None) -> List[ContractDeclaration]:
         """
         Get contracts from a specific file or all files.
-        
+
         Args:
             file_path: Optional path to specific file. If None, returns all contracts.
-            
+
         Returns:
             List of contract declarations
         """
+        # Ensure contextual analysis is done before returning contracts
+        self.ensure_contextual_analysis()
+
         if file_path:
             source_file = self.get_file(file_path)
             return source_file.contracts if source_file else []
@@ -359,8 +372,10 @@ class SourceManager:
         Perform contextual analysis on all loaded contracts.
         This improves the accuracy of external call detection.
         """
-        # Get all contracts from all files
-        all_contracts = self.get_contracts()
+        # Get all contracts from all files (without triggering contextual analysis again)
+        all_contracts = []
+        for source_file in self.files.values():
+            all_contracts.extend(source_file.contracts)
 
         if not all_contracts:
             return

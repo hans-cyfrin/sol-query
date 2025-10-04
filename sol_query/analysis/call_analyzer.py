@@ -26,6 +26,10 @@ class CallAnalyzer:
             'send', 'withdraw', 'deposit', 'mint', 'burn'
         }
 
+        # Cache for transitive analysis results
+        self._external_calls_cache: Dict[str, bool] = {}
+        self._asset_transfers_cache: Dict[str, bool] = {}
+
     def analyze_function(self, function: FunctionDeclaration, contract_context: Optional[Dict] = None) -> None:
         """
         Analyze a function for external calls and asset transfers using AST traversal.
@@ -457,8 +461,15 @@ class CallAnalyzer:
         Returns:
             True if the function or any function it calls (transitively) makes external calls
         """
+        # Check cache first
+        func_name = function.name if hasattr(function, 'name') else None
+        if func_name and func_name in self._external_calls_cache:
+            return self._external_calls_cache[func_name]
+
         # Check if function itself has external calls
         if function.has_external_calls:
+            if func_name:
+                self._external_calls_cache[func_name] = True
             return True
 
         # Build a map of function names to functions for quick lookup
@@ -467,7 +478,13 @@ class CallAnalyzer:
         # Track visited functions to avoid infinite recursion
         visited = set()
 
-        return self._has_external_calls_recursive(function, func_map, visited)
+        result = self._has_external_calls_recursive(function, func_map, visited)
+
+        # Cache the result
+        if func_name:
+            self._external_calls_cache[func_name] = result
+
+        return result
 
     def _has_external_calls_recursive(self, function: FunctionDeclaration,
                                        func_map: Dict[str, FunctionDeclaration],
@@ -513,8 +530,15 @@ class CallAnalyzer:
         Returns:
             True if the function or any function it calls (transitively) transfers assets
         """
+        # Check cache first
+        func_name = function.name if hasattr(function, 'name') else None
+        if func_name and func_name in self._asset_transfers_cache:
+            return self._asset_transfers_cache[func_name]
+
         # Check if function itself has asset transfers
         if function.has_asset_transfers:
+            if func_name:
+                self._asset_transfers_cache[func_name] = True
             return True
 
         # Build a map of function names to functions for quick lookup
@@ -523,7 +547,13 @@ class CallAnalyzer:
         # Track visited functions to avoid infinite recursion
         visited = set()
 
-        return self._has_asset_transfers_recursive(function, func_map, visited)
+        result = self._has_asset_transfers_recursive(function, func_map, visited)
+
+        # Cache the result
+        if func_name:
+            self._asset_transfers_cache[func_name] = result
+
+        return result
 
     def _has_asset_transfers_recursive(self, function: FunctionDeclaration,
                                         func_map: Dict[str, FunctionDeclaration],

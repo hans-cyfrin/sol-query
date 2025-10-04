@@ -15,8 +15,10 @@ class CallAnalyzer:
         """Initialize the call analyzer."""
         self.call_type_detector = CallTypeDetector()
 
-        # Low-level call function names
-        self.low_level_calls = {'call', 'delegatecall', 'staticcall', 'send', 'transfer'}
+        # Low-level call function names (by type)
+        self.delegate_calls = {'delegatecall'}
+        self.static_calls = {'staticcall'}
+        self.low_level_calls = {'call', 'send', 'transfer'}
 
         # Asset transfer function names
         self.asset_transfer_functions = {
@@ -126,7 +128,15 @@ class CallAnalyzer:
         # Get method name (last part)
         method_name = parts[-1].strip('()')
 
-        # Check if it's a low-level call
+        # Check for delegate calls first (most specific)
+        if method_name in self.delegate_calls:
+            return CallType.DELEGATE
+
+        # Check for static calls
+        if method_name in self.static_calls:
+            return CallType.STATIC
+
+        # Check for other low-level calls
         if method_name in self.low_level_calls:
             return CallType.LOW_LEVEL
 
@@ -173,7 +183,7 @@ class CallAnalyzer:
 
     def _is_external_call(self, call_type: CallType) -> bool:
         """Check if call type represents an external call."""
-        return call_type in [CallType.EXTERNAL, CallType.LOW_LEVEL, CallType.LIBRARY]
+        return call_type in [CallType.EXTERNAL, CallType.LOW_LEVEL, CallType.LIBRARY, CallType.DELEGATE, CallType.STATIC]
 
     def _is_asset_transfer(self, call: CallExpression, context: Dict) -> bool:
         """
@@ -235,6 +245,72 @@ class CallAnalyzer:
                     context['state_variables'] = [v.name for v in parent.variables if hasattr(v, 'name')]
 
         return context
+
+    def analyze_call_expressions(self, call_expressions: List[CallExpression], context: Dict) -> None:
+        """
+        Analyze a list of call expressions and set their call_type field.
+
+        Args:
+            call_expressions: List of call expressions to analyze
+            context: Contract context for classification
+        """
+        for call_expr in call_expressions:
+            if not isinstance(call_expr, CallExpression):
+                continue
+
+            # Classify the call
+            call_type = self._classify_call_ast(call_expr, context)
+
+            # Set the call_type field as string
+            call_expr.call_type = call_type.value if call_type else None
+
+    def analyze_all_expressions_in_ast(self, ast_root: ASTNode, context: Dict) -> None:
+        """
+        Recursively analyze all call expressions in an AST tree and set their call_type.
+
+        Args:
+            ast_root: Root AST node to start traversal
+            context: Contract context for classification
+        """
+        # Find all call expressions recursively
+        calls = self._find_all_calls_recursive(ast_root)
+
+        # Analyze each call
+        for call_expr in calls:
+            call_type = self._classify_call_ast(call_expr, context)
+            call_expr.call_type = call_type.value if call_type else None
+
+    def _find_all_calls_recursive(self, node: ASTNode) -> List[CallExpression]:
+        """Recursively find all call expressions in any AST node."""
+        calls = []
+
+        # Check if this node is a call expression
+        if isinstance(node, CallExpression):
+            calls.append(node)
+
+        # Recursively search in all children
+        if hasattr(node, 'get_children'):
+            try:
+                for child in node.get_children():
+                    if child:
+                        calls.extend(self._find_all_calls_recursive(child))
+            except:
+                pass
+
+        # Also check common attributes that might contain expressions
+        for attr_name in ['body', 'expression', 'statements', 'functions', 'initializer',
+                          'condition', 'then_statement', 'else_statement']:
+            if hasattr(node, attr_name):
+                attr = getattr(node, attr_name)
+                if attr:
+                    if isinstance(attr, list):
+                        for item in attr:
+                            if item:
+                                calls.extend(self._find_all_calls_recursive(item))
+                    else:
+                        calls.extend(self._find_all_calls_recursive(attr))
+
+        return calls
 
     def build_contract_context(self, contract, all_contracts=None) -> Dict:
         """

@@ -128,16 +128,20 @@ class ASTBuilder:
         """
         Perform contextual analysis on all functions after contracts are built.
         This provides more accurate external call detection.
-        
+
         Args:
             contracts: List of all contracts in the codebase
         """
         for contract in contracts:
-            if hasattr(contract, 'functions'):
-                # Build context for this contract
-                context = self.call_analyzer.build_contract_context(contract, contracts)
+            # Build context for this contract
+            context = self.call_analyzer.build_contract_context(contract, contracts)
 
-                # Re-analyze all functions in this contract with full context
+            # Analyze all call expressions in the entire contract AST
+            # This sets call_type on all CallExpression nodes for V1 engine compatibility
+            self.call_analyzer.analyze_all_expressions_in_ast(contract, context)
+
+            # Also analyze functions for has_external_calls flags
+            if hasattr(contract, 'functions'):
                 for function in contract.functions:
                     self.call_analyzer.analyze_function(function, context)
 

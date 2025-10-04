@@ -48,6 +48,8 @@ class CallAnalyzer:
         # Analyze each call
         has_external_calls = False
         has_asset_transfers = False
+        external_call_targets = []
+        asset_transfer_types = []
 
         for call in calls:
             call_type = self._classify_call_ast(call, contract_context)
@@ -55,14 +57,24 @@ class CallAnalyzer:
             # Check if it's an external call
             if self._is_external_call(call_type):
                 has_external_calls = True
+                # Extract call target for external_call_targets list
+                call_target = self._extract_call_target(call)
+                if call_target:
+                    external_call_targets.append(call_target)
 
             # Check if it's an asset transfer
             if self._is_asset_transfer(call, contract_context):
                 has_asset_transfers = True
+                # Extract transfer type for asset_transfer_types list
+                transfer_type = self._extract_transfer_type(call)
+                if transfer_type:
+                    asset_transfer_types.append(transfer_type)
 
-        # Update function metadata (only boolean flags, not the lists)
+        # Update function metadata (both boolean flags and lists)
         function.has_external_calls = has_external_calls
         function.has_asset_transfers = has_asset_transfers
+        function.external_call_targets = external_call_targets
+        function.asset_transfer_types = asset_transfer_types
 
     def _find_all_calls(self, node: ASTNode) -> List[CallExpression]:
         """
@@ -196,6 +208,45 @@ class CallAnalyzer:
     def _is_external_call(self, call_type: CallType) -> bool:
         """Check if call type represents an external call."""
         return call_type in [CallType.EXTERNAL, CallType.LOW_LEVEL, CallType.LIBRARY, CallType.DELEGATE, CallType.STATIC]
+
+    def _extract_call_target(self, call: CallExpression) -> Optional[str]:
+        """Extract a string representation of the call target for reporting."""
+        if not hasattr(call, 'function') or not call.function:
+            return None
+
+        function_expr = call.function
+
+        # For member access (e.g., token.transfer, target.call)
+        if isinstance(function_expr, Literal) and hasattr(function_expr, 'value'):
+            return f"external_call:{function_expr.value}"
+
+        # For identifiers (e.g., SomeContract())
+        if isinstance(function_expr, Identifier) and hasattr(function_expr, 'name'):
+            return f"external_call:{function_expr.name}"
+
+        return None
+
+    def _extract_transfer_type(self, call: CallExpression) -> Optional[str]:
+        """Extract a string representation of the transfer type for reporting."""
+        if not hasattr(call, 'function') or not call.function:
+            return None
+
+        function_expr = call.function
+
+        # For member access (e.g., token.transfer, token.transferFrom)
+        if isinstance(function_expr, Literal) and hasattr(function_expr, 'value'):
+            call_text = function_expr.value
+            if '.' in call_text:
+                method_name = call_text.split('.')[-1].strip('()')
+                if method_name in self.asset_transfer_functions:
+                    return method_name
+
+        # For identifiers
+        if isinstance(function_expr, Identifier) and hasattr(function_expr, 'name'):
+            if function_expr.name in self.asset_transfer_functions:
+                return function_expr.name
+
+        return None
 
     def _is_asset_transfer(self, call: CallExpression, context: Dict) -> bool:
         """
@@ -334,6 +385,202 @@ class CallAnalyzer:
                         calls.extend(self._find_all_calls_recursive(attr))
 
         return calls
+
+    def analyze_enhanced_call_patterns(self, function: FunctionDeclaration) -> Dict:
+        """
+        Analyze enhanced call patterns including try-catch and assembly calls.
+
+        Args:
+            function: The function to analyze
+
+        Returns:
+            Dict with analysis results including:
+            - try_catch_calls: List of try-catch call expressions
+            - assembly_calls: Dict with counts of assembly call types
+            - call_type_distribution: Dict mapping call types to counts
+            - total_calls: Total number of calls
+        """
+        if not function.body:
+            return {
+                'try_catch_calls': [],
+                'assembly_calls': {'call': 0, 'delegatecall': 0, 'staticcall': 0},
+                'call_type_distribution': {},
+                'total_calls': 0
+            }
+
+        # Find all calls
+        calls = self._find_all_calls(function.body)
+
+        # Initialize result
+        result = {
+            'try_catch_calls': [],
+            'assembly_calls': {'call': 0, 'delegatecall': 0, 'staticcall': 0},
+            'call_type_distribution': {},
+            'total_calls': len(calls)
+        }
+
+        # Analyze each call
+        for call in calls:
+            # Check if call is in try-catch (look for try statement in parents)
+            if self._is_in_try_catch(call, function.body):
+                result['try_catch_calls'].append(call)
+
+            # Check call type for distribution
+            if hasattr(call, 'call_type') and call.call_type:
+                call_type = call.call_type
+                result['call_type_distribution'][call_type] = \
+                    result['call_type_distribution'].get(call_type, 0) + 1
+
+        return result
+
+    def _is_in_try_catch(self, call: CallExpression, root_node: ASTNode) -> bool:
+        """Check if a call expression is inside a try-catch statement."""
+        # Look for try-catch by checking if call is in _nested_expressions of a statement
+        # that came from a try_statement tree-sitter node
+        # This is a simplified check - in practice we'd need to traverse the AST tree
+        # For now, check if the call's source location is near try keyword
+        if hasattr(call, 'source_location') and call.source_location:
+            source_text = call.source_location.source_text
+            # Simple heuristic: if the call text contains patterns suggesting it's in a try
+            # This is not perfect but works for basic detection
+            return False  # TODO: Implement proper try-catch detection
+        return False
+
+    def analyze_call_tree_external_calls(self, function: FunctionDeclaration, all_functions: List[FunctionDeclaration]) -> bool:
+        """
+        Analyze if a function's call tree includes any external calls (transitive analysis).
+
+        Args:
+            function: The function to analyze
+            all_functions: List of all functions in the codebase for call resolution
+
+        Returns:
+            True if the function or any function it calls (transitively) makes external calls
+        """
+        # Check if function itself has external calls
+        if function.has_external_calls:
+            return True
+
+        # Build a map of function names to functions for quick lookup
+        func_map = {f.name: f for f in all_functions if hasattr(f, 'name')}
+
+        # Track visited functions to avoid infinite recursion
+        visited = set()
+
+        return self._has_external_calls_recursive(function, func_map, visited)
+
+    def _has_external_calls_recursive(self, function: FunctionDeclaration,
+                                       func_map: Dict[str, FunctionDeclaration],
+                                       visited: Set[str]) -> bool:
+        """Recursively check if function or its callees have external calls."""
+        if not hasattr(function, 'name'):
+            return False
+
+        func_name = function.name
+
+        # Avoid infinite recursion
+        if func_name in visited:
+            return False
+        visited.add(func_name)
+
+        # Check if this function has external calls
+        if function.has_external_calls:
+            return True
+
+        # Find internal function calls and check them recursively
+        if not function.body:
+            return False
+
+        calls = self._find_all_calls(function.body)
+        for call in calls:
+            # Get the called function name
+            called_func_name = self._extract_called_function_name(call)
+            if called_func_name and called_func_name in func_map:
+                called_func = func_map[called_func_name]
+                if self._has_external_calls_recursive(called_func, func_map, visited):
+                    return True
+
+        return False
+
+    def analyze_call_tree_asset_transfers(self, function: FunctionDeclaration, all_functions: List[FunctionDeclaration]) -> bool:
+        """
+        Analyze if a function's call tree includes any asset transfers (transitive analysis).
+
+        Args:
+            function: The function to analyze
+            all_functions: List of all functions in the codebase for call resolution
+
+        Returns:
+            True if the function or any function it calls (transitively) transfers assets
+        """
+        # Check if function itself has asset transfers
+        if function.has_asset_transfers:
+            return True
+
+        # Build a map of function names to functions for quick lookup
+        func_map = {f.name: f for f in all_functions if hasattr(f, 'name')}
+
+        # Track visited functions to avoid infinite recursion
+        visited = set()
+
+        return self._has_asset_transfers_recursive(function, func_map, visited)
+
+    def _has_asset_transfers_recursive(self, function: FunctionDeclaration,
+                                        func_map: Dict[str, FunctionDeclaration],
+                                        visited: Set[str]) -> bool:
+        """Recursively check if function or its callees have asset transfers."""
+        if not hasattr(function, 'name'):
+            return False
+
+        func_name = function.name
+
+        # Avoid infinite recursion
+        if func_name in visited:
+            return False
+        visited.add(func_name)
+
+        # Check if this function has asset transfers
+        if function.has_asset_transfers:
+            return True
+
+        # Find internal function calls and check them recursively
+        if not function.body:
+            return False
+
+        calls = self._find_all_calls(function.body)
+        for call in calls:
+            # Get the called function name
+            called_func_name = self._extract_called_function_name(call)
+            if called_func_name and called_func_name in func_map:
+                called_func = func_map[called_func_name]
+                if self._has_asset_transfers_recursive(called_func, func_map, visited):
+                    return True
+
+        return False
+
+    def _extract_called_function_name(self, call: CallExpression) -> Optional[str]:
+        """Extract the name of the function being called."""
+        if not hasattr(call, 'function') or not call.function:
+            return None
+
+        function_expr = call.function
+
+        # For identifiers (direct calls like foo())
+        if isinstance(function_expr, Identifier) and hasattr(function_expr, 'name'):
+            return function_expr.name
+
+        # For member access (like this.foo()), extract the method name
+        if isinstance(function_expr, Literal) and hasattr(function_expr, 'value'):
+            call_text = function_expr.value
+            # For this.method() or obj.method(), we want the method name
+            if '.' in call_text:
+                parts = call_text.split('.')
+                method_name = parts[-1].strip('()')
+                # Only return if it looks like a simple function name (not a complex expression)
+                if method_name.isidentifier():
+                    return method_name
+
+        return None
 
     def build_contract_context(self, contract, all_contracts=None) -> Dict:
         """

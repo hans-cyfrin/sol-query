@@ -117,9 +117,8 @@ class SourceManager:
         # Store in cache
         self.files[path] = source_file
 
-        # Perform contextual analysis if we have multiple contracts
-        if len(self.get_contracts()) > 1:
-            self._perform_contextual_analysis()
+        # Perform contextual analysis to classify call expressions
+        self._perform_contextual_analysis()
 
         return source_file
 
@@ -369,15 +368,11 @@ class SourceManager:
         # For each file, perform contextual analysis
         for source_file in self.files.values():
             if source_file.ast:
-                # Recreate AST builder for this file
+                # Create AST builder for performing contextual analysis
                 ast_builder = ASTBuilder(self.parser, source_file.content, source_file.path)
 
-                # Perform contextual analysis on contracts in this file
-                file_contracts = [node for node in source_file.ast
-                                if hasattr(node, 'functions')]
-
-                if file_contracts:
-                    ast_builder.perform_contextual_analysis(all_contracts)
+                # Perform contextual analysis on the actual AST contracts
+                ast_builder.perform_contextual_analysis(all_contracts)
 
     def _update_dependencies(self, source_file: SourceFile) -> None:
         """Update dependency tracking for a source file."""

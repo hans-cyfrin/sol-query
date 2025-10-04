@@ -125,7 +125,8 @@ class CallAnalyzer:
         if len(parts) < 2:
             return CallType.UNKNOWN
 
-        # Get method name (last part)
+        # Get object and method name
+        object_name = parts[0]
         method_name = parts[-1].strip('()')
 
         # Check for delegate calls first (most specific)
@@ -147,6 +148,12 @@ class CallAnalyzer:
                 return CallType.EXTERNAL
             return CallType.INTERNAL
 
+        # Check if it's a library call (CamelCase object name, likely library)
+        if object_name and object_name[0].isupper():
+            # Check for common library patterns (SafeMath, Math, etc.)
+            if not object_name.startswith('I'):  # Not interface (interfaces start with I)
+                return CallType.LIBRARY
+
         # Otherwise, it's an external call
         return CallType.EXTERNAL
 
@@ -161,6 +168,11 @@ class CallAnalyzer:
         # Check if it's a modifier
         if function_name in context.get('contract_modifiers', []):
             return CallType.INTERNAL
+
+        # Check if it's a type conversion (starts with capital letter, likely interface/contract/type name)
+        if function_name and function_name[0].isupper():
+            # Could be type conversion: address(), uint256(), Interface(), etc.
+            return CallType.TYPE_CONVERSION
 
         # Otherwise, likely library or external
         return CallType.LIBRARY
@@ -277,8 +289,16 @@ class CallAnalyzer:
 
         # Analyze each call
         for call_expr in calls:
+            # Skip if already classified
+            if call_expr.call_type is not None:
+                continue
+
             call_type = self._classify_call_ast(call_expr, context)
-            call_expr.call_type = call_type.value if call_type else None
+            # Set call_type, defaulting to UNKNOWN if None
+            if call_type:
+                call_expr.call_type = call_type.value
+            else:
+                call_expr.call_type = CallType.UNKNOWN.value
 
     def _find_all_calls_recursive(self, node: ASTNode) -> List[CallExpression]:
         """Recursively find all call expressions in any AST node."""
@@ -298,8 +318,11 @@ class CallAnalyzer:
                 pass
 
         # Also check common attributes that might contain expressions
+        # Include try-catch specific attributes and _nested_expressions from generic statements
         for attr_name in ['body', 'expression', 'statements', 'functions', 'initializer',
-                          'condition', 'then_statement', 'else_statement']:
+                          'condition', 'then_statement', 'else_statement',
+                          'try_expression', 'try_body', 'catch_clauses', 'catch_body',
+                          'return_value', 'update_expression', '_nested_expressions']:
             if hasattr(node, attr_name):
                 attr = getattr(node, attr_name)
                 if attr:

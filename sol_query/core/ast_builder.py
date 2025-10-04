@@ -12,7 +12,8 @@ from sol_query.core.ast_nodes import (
     EnumDeclaration, Parameter, Block, Statement, Expression, Identifier,
     Literal, CallExpression, BinaryExpression, ArrayAccess, SliceAccess,
     ParenthesizedExpression, InlineArrayExpression, NewExpression, StructExpression,
-    ReturnStatement, ExpressionStatement, ImportStatement,
+    ReturnStatement, ExpressionStatement, ImportStatement, StructMember, EmitStatement,
+    PragmaDirective,
     Visibility, StateMutability, NodeType
 )
 from sol_query.core.parser import SolidityParser
@@ -546,7 +547,6 @@ class ASTBuilder:
     def _build_struct(self, node: tree_sitter.Node) -> StructDeclaration:
         """Build a struct declaration."""
         # Import here to avoid circular imports
-        from sol_query.core.ast_nodes import StructMember
 
         # Get struct name
         name_node = self._find_child_by_type(node, "identifier")
@@ -571,7 +571,6 @@ class ASTBuilder:
     def _build_struct_member(self, node: tree_sitter.Node) -> "StructMember":
         """Build a struct member."""
         # Import here to avoid circular imports
-        from sol_query.core.ast_nodes import StructMember
 
         name = ""
         type_name = ""
@@ -597,7 +596,6 @@ class ASTBuilder:
     def _build_struct_field_assignment(self, node: tree_sitter.Node) -> "Expression":
         """Build a struct field assignment."""
         # Import here to avoid circular imports
-        from sol_query.core.ast_nodes import Expression, Identifier, Literal
 
         # For now, treat struct field assignments as generic expressions
         # This could be enhanced to create a more specific AST node type
@@ -702,7 +700,6 @@ class ASTBuilder:
     def _build_emit_statement(self, node: tree_sitter.Node) -> "EmitStatement":
         """Build an emit statement."""
         # Import here to avoid circular imports
-        from sol_query.core.ast_nodes import EmitStatement
 
         event_call = None
         for child in node.children:
@@ -1322,7 +1319,6 @@ class ASTBuilder:
     def _build_pragma_directive(self, node: tree_sitter.Node) -> "PragmaDirective":
         """Build a pragma directive."""
         # Import here to avoid circular imports
-        from sol_query.core.ast_nodes import PragmaDirective
 
         # For now, use a simple text-based approach since the tree-sitter structure is complex
         full_text = self._get_node_text(node)
@@ -1390,7 +1386,6 @@ class ASTBuilder:
     def _build_type_name(self, node: tree_sitter.Node) -> "Expression":
         """Build a type name expression."""
         # Import here to avoid circular imports
-        from sol_query.core.ast_nodes import Expression, Identifier
 
         # Extract the type name text
         type_text = self._get_node_text(node)

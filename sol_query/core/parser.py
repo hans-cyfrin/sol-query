@@ -213,14 +213,10 @@ class SolidityParser:
 
     def _get_node_position(self, node: tree_sitter.Node, source_code: str) -> Tuple[int, int]:
         """Get line and column position of node start (1-indexed)."""
-        lines = source_code[:node.start_byte].split('\n')
-        line = len(lines)
-        column = len(lines[-1]) + 1
-        return line, column
+        # Use tree-sitter's native position tracking (0-indexed) and convert to 1-indexed
+        return node.start_point.row + 1, node.start_point.column + 1
 
     def _get_node_end_position(self, node: tree_sitter.Node, source_code: str) -> Tuple[int, int]:
         """Get line and column position of node end (1-indexed)."""
-        lines = source_code[:node.end_byte].split('\n')
-        line = len(lines)
-        column = len(lines[-1]) + 1
-        return line, column
+        # Use tree-sitter's native position tracking (0-indexed) and convert to 1-indexed
+        return node.end_point.row + 1, node.end_point.column + 1

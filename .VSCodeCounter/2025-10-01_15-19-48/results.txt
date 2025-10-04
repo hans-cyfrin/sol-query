@@ -1,0 +1,53 @@
+Date : 2025-10-01 15:19:48
+Directory : /Users/hansfriese/cyfrin/ai/sol-query/sol_query
+Total : 23 files,  12238 codes, 1290 comments, 2952 blanks, all 16480 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| Python   |         23 |     12,238 |      1,290 |      2,952 |     16,480 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                         | files      | code       | comment    | blank      | total      |
++------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                            |         23 |     12,238 |      1,290 |      2,952 |     16,480 |
+| . (Files)                                                                    |          1 |          8 |          0 |          4 |         12 |
+| analysis                                                                     |          7 |      2,113 |        246 |        539 |      2,898 |
+| core                                                                         |          6 |      2,557 |        288 |        630 |      3,475 |
+| models                                                                       |          2 |         94 |          2 |         28 |        124 |
+| query                                                                        |          4 |      6,863 |        729 |      1,607 |      9,199 |
+| utils                                                                        |          3 |        603 |         25 |        144 |        772 |
++------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                                                     | language | code       | comment    | blank      | total      |
++------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/__init__.py                  | Python   |          8 |          0 |          4 |         12 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/analysis/__init__.py         | Python   |          1 |          0 |          0 |          1 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/analysis/call_analyzer.py    | Python   |        633 |         76 |        180 |        889 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/analysis/call_metadata.py    | Python   |        241 |         29 |         72 |        342 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/analysis/call_types.py       | Python   |        286 |         48 |         70 |        404 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/analysis/data_flow.py        | Python   |        410 |         37 |         83 |        530 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/analysis/import_analyzer.py  | Python   |        239 |         19 |         72 |        330 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/analysis/variable_tracker.py | Python   |        303 |         37 |         62 |        402 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/core/__init__.py             | Python   |          1 |          0 |          0 |          1 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/core/ast_builder.py          | Python   |      1,248 |        173 |        252 |      1,673 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/core/ast_nodes.py            | Python   |        723 |         46 |        191 |        960 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/core/parser.py               | Python   |        162 |         11 |         53 |        226 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/core/solidity_constants.py   | Python   |        110 |         30 |         41 |        181 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/core/source_manager.py       | Python   |        313 |         28 |         93 |        434 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/models/__init__.py           | Python   |          1 |          0 |          0 |          1 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/models/source_location.py    | Python   |         93 |          2 |         28 |        123 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/query/__init__.py            | Python   |          1 |          0 |          0 |          1 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/query/collections.py         | Python   |      1,134 |         77 |        262 |      1,473 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/query/engine.py              | Python   |      2,308 |        154 |        570 |      3,032 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/query/engine_v2.py           | Python   |      3,420 |        498 |        775 |      4,693 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/utils/__init__.py            | Python   |          1 |          0 |          0 |          1 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/utils/pattern_matching.py    | Python   |        242 |         18 |         65 |        325 |
+| /Users/hansfriese/cyfrin/ai/sol-query/sol_query/utils/serialization.py       | Python   |        360 |          7 |         79 |        446 |
+| Total                                                                        |          |     12,238 |      1,290 |      2,952 |     16,480 |
++------------------------------------------------------------------------------+----------+------------+------------+------------+------------+

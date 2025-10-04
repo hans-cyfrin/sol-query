@@ -2,51 +2,51 @@
 
 ## Summary
 
-**Status**: 516/528 tests passing (97.7% pass rate)
-**Failed Tests**: 12 (all related to V1 Engine fluent API)
+**Status**: 519/528 tests passing (98.3% pass rate)
+**Failed Tests**: 9 (down from 12)
 
 ## Test Failures Breakdown
 
-### Category 1: V1 Engine Expression Collection Filters (7 failures)
+### Category 1: V1 Engine Expression Collection Filters (FIXED ✅)
 
-These tests use the V1 Engine (`SolidityQueryEngine`) fluent API which depends on the old CallAnalyzer methods that were removed during the AST-based rewrite.
+**Previously Failing** (now passing):
+1. ✅ `test_call_analysis_comprehensive.py::TestCallFiltering::test_call_type_filtering`
+2. ✅ `test_call_analysis_comprehensive.py::TestInstructionLevelAnalysis::test_instruction_level_call_finding`
+3. ✅ `test_call_analysis_comprehensive.py::TestCallAnalysisIntegration::test_call_type_completeness`
 
-**Failing Tests**:
-1. `test_call_analysis_comprehensive.py::TestCallFiltering::test_call_type_filtering`
-2. `test_call_analysis_comprehensive.py::TestInstructionLevelAnalysis::test_instruction_level_call_finding`
-3. `test_contextual_analysis.py::TestContextualAnalysis::test_interface_calls_detected`
-4. `test_external_call_filters.py::TestExternalCallFilters::test_with_external_calls_deep`
-5. `test_external_call_filters.py::TestExternalCallFilters::test_with_asset_transfers_deep`
-6. `test_external_call_filters.py::TestExternalCallFilters::test_traditional_finder_methods`
-7. `test_external_call_filters.py::TestExternalCallFilters::test_deep_vs_shallow_comparison`
+**Still Failing** (4 tests):
+1. `test_contextual_analysis.py::TestContextualAnalysis::test_interface_calls_detected`
+2. `test_external_call_filters.py::TestExternalCallFilters::test_with_external_calls_deep`
+3. `test_external_call_filters.py::TestExternalCallFilters::test_with_asset_transfers_deep`
+4. `test_external_call_filters.py::TestExternalCallFilters::test_traditional_finder_methods`
+5. `test_external_call_filters.py::TestExternalCallFilters::test_deep_vs_shallow_comparison`
 
-**Root Cause**:
-- Tests call `engine.expressions.external_calls()`, `engine.expressions.internal_calls()`, etc.
-- These V1 collection methods require CallExpression objects to have their `call_type` field set
-- Old CallAnalyzer had methods that traversed all expressions and set `call_type`
-- New AST-based CallAnalyzer focuses on function-level analysis (for `has_external_calls` flag)
-- V1 Engine doesn't trigger expression-level call type analysis
+**Root Cause (FIXED ✅)**:
+- ✅ Added `analyze_all_expressions_in_ast()` to set call_type on all CallExpression nodes
+- ✅ Added `_find_all_calls_recursive()` to traverse entire AST including try-catch blocks
+- ✅ Hooked into `perform_contextual_analysis()` which runs on every file load
+- ✅ Fixed delegate/static call detection (separate from LOW_LEVEL)
+- ✅ Fixed type conversion detection (IERC20(), address(), etc.)
+- ✅ Fixed library call detection (SafeMath.add, etc.)
+- ✅ Added `_nested_expressions` traversal for try-catch and other complex statements
 
-**What's Needed**:
-- Add expression-level call type analysis to V1 engine load process
-- Implement method to analyze all CallExpression nodes in AST and set their `call_type` field
-- Hook this into V1 engine's source loading or provide a post-processing step
+**Remaining Issues**:
+- Interface call detection needs refinement (test_interface_calls_detected)
+- Deep (transitive) call analysis methods not yet implemented (4 tests)
 
-**Impact**:
-- **V2 Engine**: ✅ Works perfectly - all tests pass
-- **V1 Engine**: ❌ Expression collections don't have call type info
-- **Core Functionality**: ✅ Not affected - function-level analysis works
+### Category 2: Advanced Call Analyzer Methods (Still Failing - 5 tests)
 
-### Category 2: Advanced Call Analyzer Methods (5 failures)
-
-These tests expect advanced analysis methods that were part of the old CallAnalyzer but not reimplemented in the AST-based version.
+These tests expect advanced analysis methods that were part of the old CallAnalyzer but not yet reimplemented in the AST-based version.
 
 **Failing Tests**:
 1. `test_call_analysis_comprehensive.py::TestAdvancedCallDetection::test_try_catch_detection`
 2. `test_call_analysis_comprehensive.py::TestAdvancedCallDetection::test_assembly_call_detection`
 3. `test_call_analysis_comprehensive.py::TestAdvancedCallDetection::test_call_type_distribution`
-4. `test_call_analysis_comprehensive.py::TestCallAnalysisIntegration::test_call_type_completeness`
-5. `test_external_call_filters.py::TestExternalCallFilters::test_bug_demonstration`
+4. `test_external_call_filters.py::TestExternalCallFilters::test_with_external_calls_deep`
+5. `test_external_call_filters.py::TestExternalCallFilters::test_with_asset_transfers_deep`
+6. `test_external_call_filters.py::TestExternalCallFilters::test_traditional_finder_methods`
+7. `test_external_call_filters.py::TestExternalCallFilters::test_deep_vs_shallow_comparison`
+8. `test_external_call_filters.py::TestExternalCallFilters::test_bug_demonstration`
 
 **Missing Methods**:
 - `analyze_enhanced_call_patterns()` - Advanced pattern detection (try-catch, assembly)
@@ -126,12 +126,28 @@ Despite these 12 test failures, the sol-query engine is **production ready** for
    - 69% code coverage
    - Real-world validation (Compound)
 
+## Recent Progress ✅
+
+**Fixed in This Session** (3 tests):
+1. ✅ Delegate and static call classification (was lumping them as LOW_LEVEL)
+2. ✅ Call type completeness - all calls now get classified (including try-catch)
+3. ✅ Expression-level call type analysis for V1 engine
+
+**Key Improvements**:
+- Added recursive traversal for `_nested_expressions` (try-catch support)
+- Type conversion detection (IERC20(), address(), etc.)
+- Library call detection (SafeMath.add, Math.sqrt, etc.)
+- Always run contextual analysis (not just for multiple contracts)
+- Proper CallType.DELEGATE and CallType.STATIC classification
+
 ## Conclusion
 
-The 12 failing tests represent optional/advanced features that:
+**Status**: 519/528 tests passing (98.3% pass rate) - UP FROM 516/528 (97.7%)
+
+The 9 remaining failing tests represent optional/advanced features that:
 - Were in old regex-based implementation
 - Not yet reimplemented in AST-based version
-- Can be added back if needed
+- Can be added back if needed (estimated 4-6 hours)
 - Don't affect core engine functionality
 
-**Recommendation**: Use V2 Engine for new code. V1 Engine works for basic queries but has limited expression filtering until Option 1 is implemented.
+**Recommendation**: Use V2 Engine for new code. V1 Engine now works well for most queries including call type filtering. Advanced transitive analysis features are optional.
